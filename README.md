@@ -239,11 +239,6 @@ pnpm dev
 | 向量知识库 | `/api/admin/vector-db/collections` | 集合管理 + 文档上传 + 重建索引 |
 | Agent API | `/api/admin/agent-api-configs` | LLM 配置管理 |
 | **提示词模板** | `/api/admin/prompts` | CRUD + 预览 + 版本历史 + 回滚 |
-| **上下文策略** | `/api/admin/context-strategies` | CRUD + 设为默认 |
-| **管道编排** | `/api/admin/pipelines` | CRUD + 绑定模板/策略/模型 + 运行评估 |
-| **评估数据集** | `/api/admin/eval-datasets` | CRUD（支持关键词期望） |
-| **评估运行** | `/api/admin/eval-runs` | 查看运行记录与详细结果 |
-| **链路追踪** | `/api/admin/traces` | 检索/组装/生成/记忆四阶段耗时 |
 
 ### 课程中心
 
