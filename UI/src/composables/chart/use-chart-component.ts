@@ -1,0 +1,97 @@
+import type { EChartsOption } from "echarts";
+import type { BaseChartProps, UseChartOptions } from "./types";
+import { computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { isFunction } from "@/common/utils";
+import { useChart } from "./use-chart";
+
+// 高级图表组件抽象
+interface UseChartComponentOptions<T extends BaseChartProps> {
+  /** Props 响应式对象 */
+  props?: T;
+  /** 图表配置 */
+  options: EChartsOption | (() => EChartsOption);
+  /** 空数据检查函数 */
+  checkEmpty?: () => boolean;
+  /** 自定义监听的响应式数据 */
+  watchSources?: (() => any)[];
+  /** 自定义可视事件处理 */
+  onVisible?: () => void;
+  /** useChart选项 */
+  chartOptions?: UseChartOptions;
+}
+
+export function useChartComponent<T extends BaseChartProps>(useChartComponentOptions: UseChartComponentOptions<T>) {
+  const { props, options, checkEmpty, watchSources = [], onVisible, chartOptions = {} } = useChartComponentOptions;
+
+  const chart = useChart(chartOptions);
+  const { chartInstance, initChart, isDark, emptyStateManager } = chart;
+
+  // 检查是否为空数据
+  const isEmpty = computed(() => {
+    if (props?.isEmpty) return true;
+    if (checkEmpty) return checkEmpty();
+    return false;
+  });
+
+  // 更新图表
+  const updateChart = () => {
+    nextTick(() => {
+      if (isEmpty.value) {
+        // 处理空数据情况 - 显示自定义空状态
+        if (chart.getChartInstance()) chart.getChartInstance().value?.clear();
+
+        // emptyStateManager.create();
+      } else {
+        // 有数据时移除空状态并初始化图表
+        // emptyStateManager.remove();
+        initChart(isFunction(options) ? options() : options);
+      }
+    });
+  };
+
+  // 处理图表进入可视区域时的逻辑
+  const handleChartVisible = () => {
+    if (onVisible) onVisible();
+    else updateChart();
+  };
+
+  // 设置数据监听
+  const setupWatchers = () => {
+    // 监听自定义数据源
+    if (watchSources.length > 0) watch(watchSources, updateChart, { deep: true });
+
+    // 监听主题变化
+    watch(isDark, () => {
+      emptyStateManager.updateStyle();
+      updateChart();
+    });
+  };
+
+  // 设置生命周期
+  const setupLifecycle = () => {
+    onMounted(() => {
+      updateChart();
+
+      // 监听图表可见事件
+      if (chartInstance.value) chartInstance.value.addEventListener("chartVisible", handleChartVisible);
+    });
+
+    onBeforeUnmount(() => {
+      // 清理事件监听器
+      if (chartInstance.value) chartInstance.value.removeEventListener("chartVisible", handleChartVisible);
+      // 清理空状态div
+      emptyStateManager.remove();
+    });
+  };
+
+  // 初始化
+  setupWatchers();
+  setupLifecycle();
+
+  return {
+    ...chart,
+    isEmpty,
+    updateChart,
+    handleChartVisible,
+  };
+}

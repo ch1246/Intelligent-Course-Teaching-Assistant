@@ -1,0 +1,66 @@
+@use "@styles/mixins/bem" as *;
+@use "@styles/mixins/function" as *;
+
+@include b(data-list-card) {
+  $card-padding: 20px;
+
+  padding: $card-padding;
+  background-color: cssVar(surface-bg-color-box);
+  border-radius: cssVar(radius);
+
+  @include el-joins(scrollbar) {
+    padding: 0 $card-padding;
+    margin: 0 calc(-1 * ($card-padding - 4px));
+  }
+
+  @include e(header) {
+    padding-bottom: 15px;
+
+    @include m(title) {
+      font-size: 18px;
+      font-weight: 500;
+      color: cssVar(gray-color-900);
+    }
+
+    @include m(subtitle) {
+      font-size: 14px;
+      color: cssVar(gray-color-500);
+    }
+  }
+
+  @include e(item) {
+    padding: 12px 0;
+
+    @include m(icon) {
+      width: 40px;
+      height: 40px;
+      margin-right: 12px;
+      border-radius: 8px;
+    }
+
+    @include e(time) {
+      margin-left: 12px;
+      font-size: 12px;
+      color: cssVar(gray-color-500);
+    }
+  }
+
+  @include e(item-content) {
+    @include m(title) {
+      margin-bottom: 4px;
+      font-size: 15px;
+      color: cssVar(gray-color-900);
+    }
+
+    @include m(status) {
+      font-size: 12px;
+      color: cssVar(gray-color-600);
+    }
+  }
+
+  @include e(more-btn) {
+    width: 100%;
+    margin-top: 25px;
+    text-align: center;
+  }
+}

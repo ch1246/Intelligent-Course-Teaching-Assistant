@@ -1,0 +1,123 @@
+# -*- coding: utf-8 -*-
+import re
+
+with open(r'D:\学习文件\毕业设计\论文\基于RAG的大模型智能教学助手_论文大纲.md', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+# 修正第1章
+content = content.replace('### 3.1 选题背景及意义', '### 1.1 选题背景及意义')
+content = content.replace('### 3.2 国内外研究现状', '### 1.2 国内外研究现状')
+content = content.replace('### 3.3 课题研究内容', '### 1.3 课题研究内容')
+content = content.replace('### 3.4 论文结构安排', '### 1.4 论文结构安排')
+content = content.replace('### 4.5 本章小结', '### 1.5 本章小结')
+content = content.replace('#### 4.2.1 RAG技术研究现状', '#### 1.2.1 RAG技术研究现状')
+content = content.replace('#### 4.2.2 大语言模型在教育中的应用', '#### 1.2.2 大语言模型在教育中的应用')
+content = content.replace('#### 3.2.3 现有研究的不足', '#### 1.2.3 现有研究的不足')
+
+# 修正第2章
+content = content.replace('### 3.1 检索增强生成（RAG）原理', '### 2.1 检索增强生成（RAG）原理')
+content = content.replace('### 3.2 大语言模型与Transformer架构', '### 2.2 大语言模型与Transformer架构')
+content = content.replace('### 3.3 向量空间模型与相似度度量', '### 2.3 向量空间模型与相似度度量')
+content = content.replace('### 3.4 文本嵌入模型', '### 2.4 文本嵌入模型')
+content = content.replace('### 3.5 后端框架Django与DRF', '### 2.5 后端框架Django与DRF')
+content = content.replace('### 3.6 前端框架Vue 3与SSE机制', '### 2.6 前端框架Vue 3与SSE机制')
+content = content.replace('### 3.7 本章小结', '### 2.7 本章小结')
+content = content.replace('#### 4.1.1 RAG的基本概念', '#### 2.1.1 RAG的基本概念')
+content = content.replace('#### 4.1.2 RAG的形式化定义', '#### 2.1.2 RAG的形式化定义')
+content = content.replace('#### 4.1.3 RAG相比纯LLM和纯检索的优势', '#### 2.1.3 RAG相比纯LLM和纯检索的优势')
+content = content.replace('#### 4.2.1 Transformer的自注意力机制', '#### 2.2.1 Transformer的自注意力机制')
+content = content.replace('#### 4.2.2 多头注意力机制', '#### 2.2.2 多头注意力机制')
+content = content.replace('#### 3.2.3 前馈神经网络与位置编码', '#### 2.2.3 前馈神经网络与位置编码')
+content = content.replace('#### 3.2.4 OpenAI Chat Completions API格式', '#### 2.2.4 OpenAI Chat Completions API格式')
+content = content.replace('#### 4.3.1 向量空间模型', '#### 2.3.1 向量空间模型')
+content = content.replace('#### 4.3.2 TF-IDF权重计算', '#### 2.3.2 TF-IDF权重计算')
+content = content.replace('#### 4.3.3 余弦相似度', '#### 2.3.3 余弦相似度')
+content = content.replace('#### 3.3.4 余弦距离', '#### 2.3.4 余弦距离')
+content = content.replace('#### 4.4.1 文本嵌入的基本概念', '#### 2.4.1 文本嵌入的基本概念')
+content = content.replace('#### 4.4.2 BPE分词算法', '#### 2.4.2 BPE分词算法')
+content = content.replace('#### 5.1.1 Django 5框架概述', '#### 2.5.1 Django 5框架概述')
+content = content.replace('#### 5.1.2 Django REST Framework（DRF）', '#### 2.5.2 Django REST Framework（DRF）')
+content = content.replace('#### 3.6.1 Vue 3的组合式API与响应式系统', '#### 2.6.1 Vue 3的组合式API与响应式系统')
+content = content.replace('#### 3.6.2 Element Plus组件库', '#### 2.6.2 Element Plus组件库')
+content = content.replace('#### 3.6.3 SSE（Server-Sent Events）流式输出机制', '#### 2.6.3 SSE（Server-Sent Events）流式输出机制')
+
+# 修正第3章
+content = content.replace('#### 4.1.1 文件上传接口设计', '#### 3.1.1 文件上传接口设计')
+content = content.replace('#### 4.1.2 文本提取', '#### 3.1.2 文本提取')
+content = content.replace('#### 4.2.1 分块算法的数学模型', '#### 3.2.1 分块算法的数学模型')
+content = content.replace('#### 4.2.2 重叠窗口的设计原理', '#### 3.2.2 重叠窗口的设计原理')
+content = content.replace('#### 3.2.3 分块参数的设计考虑', '#### 3.2.3 分块参数的设计考虑')
+content = content.replace('#### 3.2.4 分块结果存储', '#### 3.2.4 分块结果存储')
+content = content.replace('#### 4.3.1 BGE模型的向量化原理', '#### 3.3.1 BGE模型的向量化原理')
+content = content.replace('#### 4.3.2 L2归一化的数学性质', '#### 3.3.2 L2归一化的数学性质')
+content = content.replace('#### 4.3.3 向量化流程实现', '#### 3.3.3 向量化流程实现')
+content = content.replace('#### 4.4.1 ChromaDB集合与课程的映射关系', '#### 3.4.1 ChromaDB集合与课程的映射关系')
+content = content.replace('#### 4.4.2 ChromaDB的检索原理', '#### 3.4.2 ChromaDB的检索原理')
+content = content.replace('#### 5.1.1 Top-K向量检索算法', '#### 3.5.1 Top-K向量检索算法')
+content = content.replace('#### 5.1.2 相似度阈值过滤', '#### 3.5.2 相似度阈值过滤')
+content = content.replace('#### 3.6.1 摘要索引的动机', '#### 3.6.1 摘要索引的动机')
+content = content.replace('#### 3.6.2 摘要生成策略', '#### 3.6.2 摘要生成策略')
+content = content.replace('#### 3.6.3 摘要索引的实现', '#### 3.6.3 摘要索引的实现')
+content = content.replace('#### 3.6.4 摘要索引的检索优势', '#### 3.6.4 摘要索引的检索优势')
+
+# 修正第4章
+content = content.replace('#### 4.1.1 管线阶段划分', '#### 4.1.1 管线阶段划分')
+content = content.replace('#### 4.1.2 管线的形式化描述', '#### 4.1.2 管线的形式化描述')
+content = content.replace('#### 4.1.3 编排评估管道设计', '#### 4.1.3 编排评估管道设计')
+content = content.replace('#### 4.2.1 提示词的结构化设计', '#### 4.2.1 提示词的结构化设计')
+content = content.replace('#### 4.2.2 Jinja2模板引擎集成', '#### 4.2.2 Jinja2模板引擎集成')
+content = content.replace('#### 3.2.3 版本控制与回滚', '#### 4.2.3 版本控制与回滚')
+content = content.replace('#### 3.2.4 五种技能模式的提示词设计', '#### 4.2.4 五种技能模式的提示词设计')
+content = content.replace('#### 4.3.1 上下文策略配置', '#### 4.3.1 上下文策略配置')
+content = content.replace('#### 4.3.2 Token计数算法', '#### 4.3.2 Token计数算法')
+content = content.replace('#### 4.3.3 上下文组装流程', '#### 4.3.3 上下文组装流程')
+content = content.replace('#### 4.4.1 压缩策略设计', '#### 4.4.1 压缩策略设计')
+content = content.replace('#### 4.4.2 自然边界回退', '#### 4.4.2 自然边界回退')
+
+# 修正第5章
+content = content.replace('### 5.5 学生画像与知识点掌握度衰减模型', '### 5.1 知识点提取算法')
+content = content.replace('#### 5.1.1 知识点提取算法', '#### 5.1.1 知识点提取算法')
+content = content.replace('#### 5.1.2 掌握度衰减模型的数学公式', '#### 5.2.1 掌握度衰减模型的数学公式')
+
+# 修正第6章
+content = content.replace('### 3.6 智能对话模块与SSE流式输出', '### 6.2 智能对话模块与SSE流式输出')
+content = content.replace('#### 3.6.1 会话管理', '#### 6.2.1 会话管理')
+content = content.replace('#### 3.6.2 SSE流式对话接口设计', '#### 6.2.2 SSE流式对话接口设计')
+content = content.replace('#### 3.6.3 后端SSE实现', '#### 6.2.3 后端SSE实现')
+content = content.replace('#### 3.6.4 前端SSE解析', '#### 6.2.4 前端SSE解析')
+content = content.replace('### 3.7 编排评估与链路追踪', '### 6.3 编排评估与链路追踪')
+
+# 修正第7章
+content = content.replace('### 3.1 系统开发环境', '### 7.1 系统开发环境')
+content = content.replace('### 3.2 用户认证与权限管理实现', '### 7.2 用户认证与权限管理实现')
+content = content.replace('#### 4.2.1 自定义用户模型', '#### 7.2.1 自定义用户模型')
+content = content.replace('#### 4.2.2 JWT双Token认证实现', '#### 7.2.2 JWT双Token认证实现')
+content = content.replace('#### 3.2.3 角色权限控制', '#### 7.2.3 角色权限控制')
+content = content.replace('#### 3.2.4 Excel批量导入学生', '#### 7.2.4 Excel批量导入学生')
+content = content.replace('### 3.3 课程管理与选课系统实现', '### 7.3 课程管理与选课系统实现')
+content = content.replace('#### 4.3.1 课程CRUD', '#### 7.3.1 课程CRUD')
+content = content.replace('#### 4.3.2 选课审批流程', '#### 7.3.2 选课审批流程')
+content = content.replace('### 3.4 前端界面设计与实现', '### 7.4 前端界面设计与实现')
+content = content.replace('#### 4.4.1 管理中心页面', '#### 7.4.1 管理中心页面')
+content = content.replace('#### 4.4.2 课程中心页面', '#### 7.4.2 课程中心页面')
+content = content.replace('### 3.5 功能测试', '### 7.5 功能测试')
+content = content.replace('#### 5.1.1 用户认证测试', '#### 7.5.1 用户认证测试')
+content = content.replace('#### 5.1.2 课程管理与选课测试', '#### 7.5.2 课程管理与选课测试')
+content = content.replace('### 3.6 性能测试与实验分析', '### 7.6 性能测试与实验分析')
+content = content.replace('#### 3.6.1 评估指标', '#### 7.6.1 评估指标')
+content = content.replace('#### 3.6.2 向量检索响应时间实验', '#### 7.6.2 向量检索响应时间实验')
+content = content.replace('#### 3.6.3 SSE流式对话首Token延迟实验', '#### 7.6.3 SSE流式对话首Token延迟实验')
+content = content.replace('#### 3.6.4 文档处理速度实验', '#### 7.6.4 文档处理速度实验')
+content = content.replace('### 3.7 RAG回答质量评估', '### 7.7 RAG回答质量评估')
+
+# 修正第8章
+content = content.replace('### 3.1 工作总结', '### 8.1 工作总结')
+content = content.replace('### 3.2 创新点总结', '### 8.2 创新点总结')
+content = content.replace('### 3.3 不足与展望', '### 8.3 不足与展望')
+content = content.replace('#### 4.3.1 当前不足', '#### 8.3.1 当前不足')
+content = content.replace('#### 4.3.2 未来展望', '#### 8.3.2 未来展望')
+
+with open(r'D:\学习文件\毕业设计\论文\基于RAG的大模型智能教学助手_论文大纲.md', 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print('Done')

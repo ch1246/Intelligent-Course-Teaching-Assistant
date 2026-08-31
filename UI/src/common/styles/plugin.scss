@@ -1,0 +1,57 @@
+@use "mixins/namespace" as *;
+
+// nprogress 样式
+#nprogress .bar {
+  background: var(--#{$el-namespace}-color-primary) !important;
+}
+
+#nprogress .spinner-icon {
+  border-top-color: var(--#{$el-namespace}-color-primary) !important;
+  border-left-color: var(--#{$el-namespace}-color-primary) !important;
+}
+
+#nprogress .peg {
+  box-shadow:
+    0 0 10px var(--#{$el-namespace}-color-primary),
+    0 0 5px var(--#{$el-namespace}-color-primary) !important;
+}
+
+// 克隆并自定义 ElMessage 样式，不会影响 ElMessage 原本样式，在 src/utils/message.ts 中调用自定义样式 ElMessage 方法即可，暗黑模式在 src/style/dark.scss 文件进行了适配
+.antd-message {
+  padding: 10px 13px !important;
+  background: var(--#{$teek-namespace}-surface-bg-color-box) !important;
+  border-width: 0 !important;
+  box-shadow: var(--#{$teek-namespace}-box-shadow-sm) !important;
+
+  &.#{$el-namespace}-message.is-closable .#{$el-namespace}-message__content {
+    padding-right: 8px !important;
+  }
+
+  .#{$el-namespace}-message__content {
+    color: var(--#{$teek-namespace}-gray-color-900) !important;
+    pointer-events: all !important;
+    background-image: initial !important;
+  }
+
+  .#{$el-namespace}-message__closeBtn {
+    color: var(--#{$el-namespace}-text-color-regular);
+    border-radius: 50%;
+    transition:
+      background-color 0.2s,
+      color 0.2s;
+
+    &:hover {
+      background-color: var(--#{$teek-namespace}-gray-color-200);
+    }
+  }
+}
+
+html.dark {
+  .antd-message {
+    .#{$el-namespace}-message__closeBtn {
+      &:hover {
+        background-color: var(--#{$teek-namespace}-gray-color-400);
+      }
+    }
+  }
+}

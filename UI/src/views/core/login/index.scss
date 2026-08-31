@@ -1,0 +1,136 @@
+﻿@use "@styles/mixins/bem" as *;
+@use "@styles/mixins/namespace" as *;
+@use "@styles/mixins/function" as *;
+@use "@styles/common/var" as *;
+
+@include b(login) {
+  position: relative;
+  height: 100vh;
+  min-height: 550px;
+  padding: 30px;
+  background-color: var(--tk-surface-bg-color-page);
+  background-image: url("@/common/assets/images/login/login_bg.svg");
+  background-size: cover;
+  background-position: center;
+  transition: background-color 0.35s ease;
+
+  @include e(dark) {
+    position: absolute;
+    top: 24px;
+    right: 32px;
+    z-index: 10;
+
+    :deep(.el-switch) {
+      --el-switch-on-color: var(--tk-color-primary);
+      --el-switch-off-color: var(--tk-gray-color-400);
+      height: 28px;
+
+      .el-switch__core {
+        width: 56px !important;
+        height: 28px;
+        border-radius: 14px;
+      }
+
+      .el-switch__action {
+        width: 22px;
+        height: 22px;
+      }
+    }
+  }
+
+  @include e(wrapper) {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    width: 100%;
+    height: 100%;
+    padding: 0 50px;
+    background: color-mix(in srgb, var(--tk-surface-bg-color-page) 55%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid var(--tk-surface-border-color);
+    transition: all 0.35s ease;
+
+    @media (max-width: $device-ipad) {
+      padding: 0;
+      background: transparent;
+      backdrop-filter: none;
+      border: none;
+    }
+
+    @include e(left) {
+      width: 900px;
+
+      img {
+        width: 100%;
+        height: 100%;
+      }
+    }
+
+    @include e(right) {
+      min-width: 450px;
+      max-height: 100%;
+      padding: 55px 40px 55px;
+      overflow: auto;
+      background-color: var(--tk-surface-bg-color-box);
+      border: 1px solid var(--tk-surface-border-color);
+      border-radius: 16px;
+      box-shadow:
+        0 4px 24px rgba(0, 0, 0, 0.06),
+        0 1px 4px rgba(0, 0, 0, 0.04);
+      transition: all 0.35s ease;
+
+      @media (max-width: $device-phone) {
+        min-width: 100%;
+      }
+
+      @include e(right__header) {
+        flex-wrap: wrap;
+        gap: 15px;
+        margin-bottom: 30px;
+
+        img {
+          width: 60px;
+          height: auto;
+        }
+
+        .title {
+          margin: 0;
+          font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+          font-size: 42px;
+          font-weight: 700;
+          line-height: 1;
+          letter-spacing: 4px;
+          color: var(--tk-surface-gray-color);
+          white-space: wrap;
+          transition: color 0.35s ease;
+
+          @media (max-width: 640px) {
+            font-size: 24px;
+            letter-spacing: 2px;
+            text-align: center;
+          }
+        }
+      }
+    }
+  }
+}
+
+html.dark {
+  @include b(login) {
+    @include e(wrapper) {
+      background: color-mix(in srgb, var(--tk-surface-bg-color-page) 70%, transparent);
+
+      img {
+        filter: brightness(0.85) saturate(1.1);
+      }
+
+      @include e(right) {
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.25),
+          0 1px 4px rgba(0, 0, 0, 0.15);
+      }
+    }
+  }
+}

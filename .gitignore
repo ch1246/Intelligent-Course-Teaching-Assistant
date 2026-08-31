@@ -1,0 +1,30 @@
+﻿# Python / Django
+backend/.venv/
+backend/chroma_data/
+backend/media/
+*.py[cod]
+__pycache__/
+
+# Node / Frontend
+UI/node_modules/
+UI/dist/
+
+# IDE
+.idea/
+.vscode/
+
+# Env
+.env
+.env.local
+.env.development
+.env.production
+.env.sit
+.env.uat
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs (not committed)
+docs/

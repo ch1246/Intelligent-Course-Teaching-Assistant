@@ -1,0 +1,15 @@
+@use "@styles/mixins/bem" as *;
+@use "@styles/mixins/function" as *;
+
+@include b(refresh) {
+  width: 45px;
+  height: 100%;
+  font-size: 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color cssVar(transition-duration);
+
+  &:hover {
+    background-color: cssVar(layout-header-bg-hover-color);
+  }
+}

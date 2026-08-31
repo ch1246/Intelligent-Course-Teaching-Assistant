@@ -1,0 +1,1 @@
+import{E as c,b4 as s,M as p,I as u}from"./vue-chunks-h-uqbfRA.js";const d=c({name:"Redirect",__name:"redirect",setup(_){const{currentRoute:t,replace:r}=s(),{params:a,query:n}=t.value,{path:e}=a,o=Array.isArray(e)?e.join("/"):e;return r({path:"/"+o,query:n}),(i,m)=>(u(),p("div"))}});export{d as default};
