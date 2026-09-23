@@ -1,5 +1,5 @@
 ﻿from django.utils import timezone
-from django.db.models import Count
+from django.db.models import Count, Sum
 from datetime import timedelta
 from rest_framework.decorators import api_view
 from accounts.views import make_response
@@ -38,9 +38,10 @@ def admin_dashboard(request):
 def student_home_stats(request):
     """Student-facing home stats: enrolled courses, learning minutes, messages, days."""
     course_count = request.user.enrollments.filter(status='approved').count()
-    total_minutes = round(
-        sum(r.duration_seconds for r in LearningRecord.objects.filter(user=request.user)) / 60, 1
-    )
+    total_seconds = LearningRecord.objects.filter(
+        user=request.user
+    ).aggregate(total=Sum('duration_seconds'))['total'] or 0
+    total_minutes = round(total_seconds / 60, 1)
     total_messages = ChatMessage.objects.filter(session__user=request.user).count()
     days = (timezone.now().date() - request.user.date_joined.date()).days
     return make_response(data={
@@ -70,9 +71,10 @@ def dashboard(request, course_id):
     ).first()
 
     # Total learning minutes for this user (stored as seconds)
-    total_minutes = round(
-        sum(r.duration_seconds for r in LearningRecord.objects.filter(user=request.user, course=course)) / 60, 1
-    )
+    total_seconds = LearningRecord.objects.filter(
+        user=request.user, course=course
+    ).aggregate(total=Sum('duration_seconds'))['total'] or 0
+    total_minutes = round(total_seconds / 60, 1)
 
     # Progress: learning minutes / (chapters * 60 min per chapter), capped at 100
     if course.chapters > 0:
@@ -117,22 +119,32 @@ def chat_stats(request, course_id):
     sessions = ChatSession.objects.filter(course_id=course_id)
     total_sessions = sessions.count()
     total_messages = ChatMessage.objects.filter(session__course_id=course_id).count()
-    # Per-skill stats
+    # Per-skill stats (single query with GROUP BY)
+    skill_counts = dict(
+        sessions.values_list('skill').annotate(c=Count('id')).values_list('skill', 'c')
+    )
     skill_stats = {}
     for skill in ChatSession.Skill.values:
-        count = sessions.filter(skill=skill).count()
         skill_stats[skill] = {
             'label': dict(ChatSession.Skill.choices).get(skill, skill),
-            'count': count,
+            'count': skill_counts.get(skill, 0),
         }
-    # Last 7 days
+    # Last 7 days (single query with GROUP BY)
+    today = timezone.now().date()
+    seven_days_ago = today - timedelta(days=6)
+    day_counts = dict(
+        ChatMessage.objects.filter(
+            session__course_id=course_id, created_at__date__gte=seven_days_ago
+        )
+        .extra(select={'day': 'DATE(created_at)'})
+        .values_list('day')
+        .annotate(c=Count('id'))
+        .values_list('day', 'c')
+    )
     days = []
     for i in range(6, -1, -1):
-        d = timezone.now().date() - timedelta(days=i)
-        count = ChatMessage.objects.filter(
-            session__course_id=course_id, created_at__date=d
-        ).count()
-        days.append({'date': str(d), 'count': count})
+        d = today - timedelta(days=i)
+        days.append({'date': str(d), 'count': day_counts.get(d, 0)})
 
     total_questions = ChatMessage.objects.filter(
         session__course_id=course_id, role=ChatMessage.Role.USER
