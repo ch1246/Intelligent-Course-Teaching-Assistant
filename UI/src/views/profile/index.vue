@@ -135,20 +135,7 @@ interface OpLog {
   time: string;
 }
 
-const opLogs = ref<OpLog[]>([
-  { id: 1, type: "login", ip: "192.168.1.105", browser: "Chrome 125", time: "2026-07-16 08:30:22" },
-  { id: 2, type: "profileUpdate", ip: "192.168.1.105", browser: "Chrome 125", time: "2026-07-15 14:22:10" },
-  { id: 3, type: "logout", ip: "192.168.1.105", browser: "Chrome 125", time: "2026-07-15 14:20:05" },
-  { id: 4, type: "login", ip: "192.168.1.105", browser: "Chrome 125", time: "2026-07-15 09:15:48" },
-  { id: 5, type: "passwordChange", ip: "192.168.1.105", browser: "Chrome 125", time: "2026-07-14 16:05:33" },
-  { id: 6, type: "emailBind", ip: "10.0.0.88", browser: "Firefox 126", time: "2026-07-13 11:45:12" },
-  { id: 7, type: "login", ip: "10.0.0.88", browser: "Firefox 126", time: "2026-07-13 11:42:00" },
-  { id: 8, type: "login", ip: "192.168.1.105", browser: "Chrome 124", time: "2026-07-12 08:10:55" },
-  { id: 9, type: "phoneBind", ip: "192.168.1.105", browser: "Chrome 124", time: "2026-07-11 15:30:18" },
-  { id: 10, type: "login", ip: "172.16.0.50", browser: "Edge 124", time: "2026-07-10 09:00:42" },
-  { id: 11, type: "wechatBind", ip: "172.16.0.50", browser: "Edge 124", time: "2026-07-09 17:20:30" },
-  { id: 12, type: "passwordReset", ip: "172.16.0.50", browser: "Edge 124", time: "2026-07-08 20:45:11" },
-]);
+const opLogs = ref<OpLog[]>([]);
 
 const getOpTypeLabel = (type: string) => {
   const map: Record<string, string> = {
