@@ -298,6 +298,10 @@ export default {
     time: "Time",
     creator: "Creator",
     updateTime: "Updated",
+    justNow: "Just now",
+    unknown: "Unknown",
+    noContent: "No content",
+    warning: "Warning",
   },
   _home: {
     greetingMorning: "Good Morning",

@@ -298,6 +298,10 @@ export default {
     time: "时间",
     creator: "创建者",
     updateTime: "更新时间",
+    justNow: "刚刚",
+    unknown: "未知",
+    noContent: "暂无内容",
+    warning: "提示",
   },
   _home: {
     greetingMorning: "早上好",
