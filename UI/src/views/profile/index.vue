@@ -72,56 +72,30 @@ interface UserMessage {
   time: string;
 }
 
-const messages = ref<UserMessage[]>([
-  {
-    id: 1,
-    title: t("_profile.messageSystemTitle"),
-    content: t("_profile.messageSystemWelcome"),
-    type: "system",
-    read: true,
-    time: "2026-07-15 09:00",
-  },
-  {
-    id: 2,
-    title: t("_profile.messageCourseTitle"),
-    content: t("_profile.messageCourseStart"),
-    type: "course",
-    read: false,
-    time: "2026-07-14 18:30",
-  },
-  {
-    id: 3,
-    title: t("_profile.messageReviewTitle"),
-    content: t("_profile.messageReviewApproved"),
-    type: "review",
-    read: false,
-    time: "2026-07-14 15:20",
-  },
-  {
-    id: 4,
-    title: t("_profile.messageSystemTitle"),
-    content: t("_profile.messageSystemMaintenance"),
-    type: "system",
-    read: true,
-    time: "2026-07-13 10:00",
-  },
-  {
-    id: 5,
-    title: t("_profile.messageCourseTitle"),
-    content: t("_profile.messageCourseDeadline"),
-    type: "course",
-    read: true,
-    time: "2026-07-12 14:00",
-  },
-  {
-    id: 6,
-    title: t("_profile.messageReviewTitle"),
-    content: t("_profile.messageReviewRejected"),
-    type: "review",
-    read: false,
-    time: "2026-07-11 09:45",
-  },
-]);
+const messages = ref<UserMessage[]>([]);
+
+const loadMessages = async () => {
+  try {
+    const res = await http.get<httpNs.Response<{ unread: any[]; read: any[] }>>("/messages");
+    const data = res.data || {};
+    const all = [
+      ...(data.unread || []).map((m: any) => ({ ...m, read: false })),
+      ...(data.read || []).map((m: any) => ({ ...m, read: true })),
+    ];
+    messages.value = all.slice(0, 10).map((m: any, idx: number) => ({
+      id: m.id || idx + 1,
+      title: m.title || "",
+      content: m.content || m.description || "",
+      type: m.id?.startsWith?.("enroll") || m.id?.startsWith?.("my_enroll") ? "review" : "system",
+      read: m.read ?? true,
+      time: m.createTime || "",
+    }));
+  } catch {
+    messages.value = [];
+  }
+};
+
+onMounted(loadMessages);
 
 const unreadCount = computed(() => messages.value.filter(m => !m.read).length);
 
