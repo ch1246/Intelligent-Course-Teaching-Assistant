@@ -58,7 +58,7 @@ def template_detail(request, pk):
         return make_response(data=PromptTemplateDetailSerializer(tmpl).data)
     elif request.method == "PUT":
         old_content = tmpl.content
-        ser = PromptTemplateListSerializer(tmpl, data=request.data, partial=True)
+        ser = PromptTemplateDetailSerializer(tmpl, data=request.data, partial=True)
         if not ser.is_valid():
             return make_response(code=400, message=str(ser.errors), http_status=400)
         tmpl = ser.save()

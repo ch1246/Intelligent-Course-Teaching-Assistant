@@ -135,11 +135,15 @@ const previewVars = reactive({
   user_question: t("_prompts.previewUserQuestion"),
 });
 
-onMounted(() => {
+onMounted(async () => {
   if (isEdit.value) {
-    http.get(`/admin/prompts/${route.params.id}`).then((res: any) => {
+    try {
+      const res: any = await http.get(`/admin/prompts/${route.params.id}`);
       Object.assign(form, res.data);
-    });
+    } catch (err: any) {
+      ElMessage.error(err?.message || t("_prompts.loadFailed"));
+      router.back();
+    }
   }
 });
 
@@ -160,18 +164,23 @@ async function handlePreview() {
   }
 }
 
-function handleSubmit() {
-  formRef.value?.validate((valid: boolean) => {
-    if (!valid) return;
-    submitting.value = true;
-    const data = { ...form };
-    const req = isEdit.value ? http.put(`/admin/prompts/${route.params.id}`, data) : http.post("/admin/prompts", data);
-    req
-      .then(() => {
-        ElMessage.success(isEdit.value ? t("_prompts.saveSuccess") : t("_prompts.createSuccess"));
-        router.back();
-      })
-      .finally(() => (submitting.value = false));
-  });
+async function handleSubmit() {
+  const valid = await formRef.value?.validate().catch(() => false);
+  if (!valid) return;
+  submitting.value = true;
+  const data = { ...form };
+  try {
+    if (isEdit.value) {
+      await http.put(`/admin/prompts/${route.params.id}`, data);
+    } else {
+      await http.post("/admin/prompts", data);
+    }
+    ElMessage.success(isEdit.value ? t("_prompts.saveSuccess") : t("_prompts.createSuccess"));
+    router.back();
+  } catch (err: any) {
+    ElMessage.error(err?.message || t("_prompts.saveFailed"));
+  } finally {
+    submitting.value = false;
+  }
 }
 </script>

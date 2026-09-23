@@ -150,3 +150,4 @@ CHROMADB_PERSIST_DIR = os.environ.get("CHROMADB_PERSIST_DIR", str(BASE_DIR / "ch
 
 # ── File Upload ────────────────────────────────────────
 FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB

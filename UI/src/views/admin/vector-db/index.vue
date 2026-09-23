@@ -2,7 +2,7 @@
 import type { FormInstance } from "element-plus";
 import { ref, computed, reactive, useTemplateRef, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Search, Refresh, Plus, Delete } from "@element-plus/icons-vue";
+import { Search, Refresh, Plus, Delete, Upload } from "@element-plus/icons-vue";
 import { t } from "@/common/languages";
 import { http } from "@/common/http";
 
@@ -237,6 +237,75 @@ const formatDate = (dateStr: string) => {
   if (!dateStr) return "-";
   return dateStr;
 };
+
+// Upload document
+const uploading = ref(false);
+const uploadDialogVisible = ref(false);
+const uploadSelectedCollectionId = ref<number | null>(null);
+let pendingFile: File | null = null;
+
+const openUploadDialog = () => {
+  uploadSelectedCollectionId.value = collections.value.length > 0 ? collections.value[0].id : null;
+  uploadDialogVisible.value = true;
+};
+
+const handleUpload = (col?: VectorCollection) => {
+  if (col) {
+    // Direct upload from table row
+    uploadSelectedCollectionId.value = col.id;
+    triggerFileSelect();
+  } else {
+    // Open dialog to select collection first
+    openUploadDialog();
+  }
+};
+
+const triggerFileSelect = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".pdf,.txt,.md,.docx,.pptx";
+  input.onchange = async (e: any) => {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+    const targetId = uploadSelectedCollectionId.value;
+    if (!targetId) {
+      ElMessage.warning("请先选择目标集合");
+      return;
+    }
+    uploadDialogVisible.value = false;
+    uploading.value = true;
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("collection_id", String(targetId));
+      await http.post("/admin/vector-db/documents/upload", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      ElMessage.success(`文件 ${file.name} 上传成功，正在重建索引...`);
+      // Auto reindex after upload
+      try {
+        await http.post(`/admin/vector-db/collections/${targetId}/reindex`);
+        ElMessage.success("索引重建已触发");
+      } catch {
+        ElMessage.warning("文件上传成功，但索引重建失败，请手动重建");
+      }
+      await fetchCollections();
+    } catch {
+      ElMessage.error("文件上传失败");
+    } finally {
+      uploading.value = false;
+    }
+  };
+  input.click();
+};
+
+const confirmUploadCollection = () => {
+  if (!uploadSelectedCollectionId.value) {
+    ElMessage.warning("请选择目标集合");
+    return;
+  }
+  triggerFileSelect();
+};
 </script>
 
 <template>
@@ -326,6 +395,9 @@ const formatDate = (dateStr: string) => {
           <el-button :icon="Refresh" text @click="handleRefresh">
             {{ $t("_common.refresh") }}
           </el-button>
+          <el-button :icon="Upload" type="success" :loading="uploading" @click="handleUpload()">
+            上传文档
+          </el-button>
           <el-button :icon="Plus" type="primary" @click="openCreateDialog">
             {{ $t("_adminVectorDB.createCollection") }}
           </el-button>
@@ -385,10 +457,13 @@ const formatDate = (dateStr: string) => {
             <span class="time-text">{{ formatDate(row.last_indexed_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('_adminVectorDB.operation')" width="200" align="center" fixed="right">
+        <el-table-column :label="$t('_adminVectorDB.operation')" width="250" align="center" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" :icon="Plus" @click="openEditDialog(row)">
               {{ $t("_common.edit") }}
+            </el-button>
+            <el-button link type="success" size="small" :icon="Upload" @click="handleUpload(row)">
+              上传
             </el-button>
             <el-button link type="warning" size="small" :loading="row.status === 'indexing'" @click="reindex(row)">
               {{ $t("_adminVectorDB.rebuildIndex") }}
@@ -451,6 +526,31 @@ const formatDate = (dateStr: string) => {
       <template #footer>
         <el-button @click="dialogVisible = false">{{ $t("_common.cancel") }}</el-button>
         <el-button type="primary" :loading="submitting" @click="submitForm">{{ $t("_common.confirm") }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Upload Document Dialog -->
+    <el-dialog v-model="uploadDialogVisible" title="上传文档到向量集合" width="460px" destroy-on-close>
+      <el-form label-width="80px">
+        <el-form-item label="目标集合">
+          <el-select v-model="uploadSelectedCollectionId" placeholder="选择向量集合" style="width: 100%">
+            <el-option
+              v-for="col in collections"
+              :key="col.id"
+              :label="`${col.name} (${col.course_name || '-'})`"
+              :value="col.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="文件格式">
+          <span style="color: var(--tk-gray-color-500); font-size: 13px;">支持 PDF、Word、PPT、Markdown、TXT</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="uploadDialogVisible = false">取消</el-button>
+        <el-button type="success" :loading="uploading" @click="confirmUploadCollection">
+          选择文件并上传
+        </el-button>
       </template>
     </el-dialog>
   </div>

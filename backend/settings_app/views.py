@@ -61,6 +61,9 @@ def agent_api_config_detail(request, pk):
         data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
         if "api_key" in data and data["api_key"] == "":
             del data["api_key"]
+        # Guard: if someone accidentally sends the masked key back, strip it
+        if "api_key" in data and isinstance(data["api_key"], str) and data["api_key"].startswith("sk-****"):
+            del data["api_key"]
         ser = AgentAPIConfigSerializer(config, data=data, partial=True)
         if not ser.is_valid():
             return make_response(code=400, message=str(ser.errors), http_status=400)

@@ -506,6 +506,7 @@ def chat_completions(request, course_id):
                         # ── Phase 4: 生成 ──────────────────
                         t0 = _time.time()
                         first_content = True
+                        ai_response_text = ""
                         async for event in chat_stream_structured(
                             messages=messages, base_url=config.base_url,
                             api_key=config.get_api_key(), model=model,
@@ -514,18 +515,19 @@ def chat_completions(request, course_id):
                                 if first_content:
                                     queue.append({"_ctrl": "answer_start"})
                                     first_content = False
+                                ai_response_text += event["content"]
                                 queue.append(event)
 
                         t_generate = (_time.time() - t0) * 1000
                         await sync_to_async(TraceLog.objects.create)(
                             session=trace_session, phase="generate",
                             duration_ms=round(t_generate, 1),
-                            detail={"model": model, "response_length": len(full_response)},
+                            detail={"model": model, "response_length": len(ai_response_text)},
                         )
 
                         # ── Phase 5: 更新记忆 ──────────────
                         t0 = _time.time()
-                        await sync_to_async(_update_memory)(user, course, user_message, full_response)
+                        await sync_to_async(_update_memory)(user, course, user_message, ai_response_text)
                         t_memory = (_time.time() - t0) * 1000
                         await sync_to_async(TraceLog.objects.create)(
                             session=trace_session, phase="memory",

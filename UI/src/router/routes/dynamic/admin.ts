@@ -92,6 +92,24 @@ const adminRoutes: RouterConfigRaw = {
       },
     },
     {
+      path: "context-strategies",
+      name: "AdminContextStrategies",
+      component: "/admin/context-strategy/index",
+      meta: { title: "上下文策略", roles: ["admin", "teacher"] },
+    },
+    {
+      path: "pipelines",
+      name: "AdminPipelines",
+      component: "/admin/pipelines/index",
+      meta: { title: "管道编排", roles: ["admin", "teacher"] },
+    },
+    {
+      path: "traces",
+      name: "AdminTraces",
+      component: "/admin/traces/index",
+      meta: { title: "链路追踪", roles: ["admin", "teacher"] },
+    },
+    {
       path: "prompts",
       name: "AdminPrompts",
       component: "/admin/prompts/index",

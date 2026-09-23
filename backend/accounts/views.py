@@ -402,3 +402,60 @@ def get_menu_list(request):
             {"menuCode": "admin-center", "menuName": "管理中心", "menuUrl": "/admin/dashboard", "pagePath": "/admin/dashboard", "parentMenuCode": "", "seq": 99, "imageIcon": ""},
         ]
     return make_response(data=all_menus)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def message_list(request):
+    """Return real system messages for the current user."""
+    user = request.user
+    unread = []
+    read = []
+
+    # Pending enrollment approvals (for admin/teacher)
+    if hasattr(user, "role") and user.role in ("admin", "teacher"):
+        from enrollments.models import Enrollment
+        pending = Enrollment.objects.filter(status="pending").select_related("student", "course").order_by("-enrolled_at")[:10]
+        for e in pending:
+            msg = {
+                "id": f"enroll_{e.id}",
+                "title": f"选课审批：{e.student.username} 申请加入「{e.course.name}」",
+                "content": f"学生 {e.student.username} 申请选修课程「{e.course.name}」，请审批。",
+                "description": f"申请时间：{e.enrolled_at.strftime('%Y-%m-%d %H:%M')}",
+                "createTime": e.enrolled_at.strftime("%Y-%m-%d %H:%M"),
+            }
+            unread.append(msg)
+
+    # Enrollment status (for student)
+    if hasattr(user, "role") and user.role == "student":
+        from enrollments.models import Enrollment
+        my_enrolls = Enrollment.objects.filter(student=user).select_related("course").order_by("-enrolled_at")[:10]
+        for e in my_enrolls:
+            status_map = {"pending": "审核中", "approved": "已通过", "rejected": "已拒绝"}
+            ts = e.reviewed_at or e.enrolled_at
+            msg = {
+                "id": f"my_enroll_{e.id}",
+                "title": f"选课状态更新：「{e.course.name}」",
+                "content": f"您的选课申请「{e.course.name}」当前状态：{status_map.get(e.status, e.status)}",
+                "description": f"更新时间：{ts.strftime('%Y-%m-%d %H:%M') if ts else ''}",
+                "createTime": ts.strftime("%Y-%m-%d %H:%M") if ts else "",
+            }
+            if e.status == "pending":
+                unread.append(msg)
+            else:
+                read.append(msg)
+
+    # Recent chat sessions (for all users)
+    from chat.models import ChatSession
+    recent_sessions = ChatSession.objects.filter(user=user).order_by("-updated_at")[:5]
+    for s in recent_sessions:
+        msg = {
+            "id": f"session_{s.id}",
+            "title": f"对话会话：{s.title}",
+            "content": f"课程对话「{s.title}」有新的活动",
+            "description": f"最后更新：{s.updated_at.strftime('%Y-%m-%d %H:%M') if s.updated_at else ''}",
+            "createTime": s.updated_at.strftime("%Y-%m-%d %H:%M") if s.updated_at else "",
+        }
+        read.append(msg)
+
+    return make_response(data={"unread": unread, "read": read, "recycle": []})

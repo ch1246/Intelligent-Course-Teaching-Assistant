@@ -65,16 +65,16 @@ const filteredConfigs = computed(() => {
   return configs.value.filter(c => c.name.toLowerCase().includes(s) || c.base_url.toLowerCase().includes(s));
 });
 
-function fetchConfigs() {
+async function fetchConfigs() {
   loading.value = true;
-  http
-    .get<httpNs.Response<AgentAPIConfig[]>>("/admin/agent-api-configs")
-    .then(res => {
-      configs.value = res.data || [];
-    })
-    .finally(() => {
-      loading.value = false;
-    });
+  try {
+    const res = await http.get<httpNs.Response<AgentAPIConfig[]>>("/admin/agent-api-configs");
+    configs.value = res.data || [];
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(t("_agentAPI.fetchFailed")));
+  } finally {
+    loading.value = false;
+  }
 }
 
 function openCreate() {
@@ -126,39 +126,44 @@ async function handleSave() {
     payload.api_key = form.api_key;
   }
 
-  if (isEditing.value && editId.value) {
-    http.put<httpNs.Response<AgentAPIConfig>>(`/admin/agent-api-configs/${editId.value}`, payload).then(res => {
+  try {
+    if (isEditing.value && editId.value) {
+      await http.put<httpNs.Response<AgentAPIConfig>>(`/admin/agent-api-configs/${editId.value}`, payload);
       ElMessage.success(String(t("_agentAPI.updateSuccess")));
-      dialogVisible.value = false;
-      fetchConfigs();
-    });
-  } else {
-    http.post<httpNs.Response<AgentAPIConfig>>("/admin/agent-api-configs", payload).then(res => {
+    } else {
+      await http.post<httpNs.Response<AgentAPIConfig>>("/admin/agent-api-configs", payload);
       ElMessage.success(String(t("_agentAPI.createSuccess")));
-      dialogVisible.value = false;
-      fetchConfigs();
-    });
+    }
+    dialogVisible.value = false;
+    fetchConfigs();
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(t("_agentAPI.saveFailed")));
   }
 }
 
-function handleDelete(row: AgentAPIConfig) {
-  ElMessageBox.confirm(
-    String(t("_agentAPI.deleteConfirm")).replace("{name}", row.name),
-    String(t("_agentAPI.deleteTitle")),
-    { type: "warning" }
-  ).then(() => {
-    http.delete(`/admin/agent-api-configs/${row.id}`).then(() => {
-      ElMessage.success(String(t("_agentAPI.deleteSuccess")));
-      fetchConfigs();
-    });
-  });
+async function handleDelete(row: AgentAPIConfig) {
+  try {
+    await ElMessageBox.confirm(
+      String(t("_agentAPI.deleteConfirm")).replace("{name}", row.name),
+      String(t("_agentAPI.deleteTitle")),
+      { type: "warning" }
+    );
+    await http.delete(`/admin/agent-api-configs/${row.id}`);
+    ElMessage.success(String(t("_agentAPI.deleteSuccess")));
+    fetchConfigs();
+  } catch {
+    /* cancelled or error */
+  }
 }
 
-function setDefault(row: AgentAPIConfig) {
-  http.put<httpNs.Response<AgentAPIConfig>>(`/admin/agent-api-configs/${row.id}/default`).then(() => {
+async function setDefault(row: AgentAPIConfig) {
+  try {
+    await http.put<httpNs.Response<AgentAPIConfig>>(`/admin/agent-api-configs/${row.id}/default`);
     ElMessage.success(String(t("_agentAPI.setDefaultSuccess")));
     fetchConfigs();
-  });
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(t("_agentAPI.operationFailed")));
+  }
 }
 
 function maskKey(key: string): string {

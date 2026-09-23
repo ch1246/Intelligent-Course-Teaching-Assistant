@@ -121,22 +121,24 @@ const skillMap: Record<string, string> = {
 };
 const skillLabel = (s: string) => skillMap[s] || s;
 
-function fetchList() {
+async function fetchList() {
   loading.value = true;
-  http
-    .get("/admin/prompts", {
+  try {
+    const res: any = await http.get("/admin/prompts", {
       params: {
         page: page.value,
         pageSize: pageSize.value,
         skill: skillFilter.value || undefined,
         keyword: search.value || undefined,
       },
-    })
-    .then((res: any) => {
-      list.value = res.data.list;
-      total.value = res.data.total;
-    })
-    .finally(() => (loading.value = false));
+    });
+    list.value = res.data.list;
+    total.value = res.data.total;
+  } catch (err: any) {
+    ElMessage.error(err?.message || t("_common.fetchFailed"));
+  } finally {
+    loading.value = false;
+  }
 }
 
 function onSearch() {
@@ -151,39 +153,47 @@ function handleEdit(row: any) {
   router.push(`/admin/prompts/${row.id}/edit`);
 }
 
-function handleVersions(row: any) {
-  http.get(`/admin/prompts/${row.id}/versions`).then((res: any) => {
+async function handleVersions(row: any) {
+  try {
+    const res: any = await http.get(`/admin/prompts/${row.id}/versions`);
     versions.value = res.data;
     versionVisible.value = true;
-  });
+  } catch (err: any) {
+    ElMessage.error(err?.message || t("_common.fetchFailed"));
+  }
 }
 
-function handleRollback(vrow: any) {
-  ElMessageBox.confirm(t("_prompts.rollbackConfirm"), t("_common.confirm"), { type: "warning" }).then(() => {
-    http.post(`/admin/prompts/${vrow.template}/rollback`, { version_id: vrow.id }).then(() => {
-      ElMessage.success(t("_prompts.rollbackSuccess"));
-      versionVisible.value = false;
-      fetchList();
-    });
-  });
+async function handleRollback(vrow: any) {
+  try {
+    await ElMessageBox.confirm(t("_prompts.rollbackConfirm"), t("_common.confirm"), { type: "warning" });
+    await http.post(`/admin/prompts/${vrow.template}/rollback`, { version_id: vrow.id });
+    ElMessage.success(t("_prompts.rollbackSuccess"));
+    versionVisible.value = false;
+    fetchList();
+  } catch {
+    /* cancelled or error */
+  }
 }
 
-function handleSetDefault(row: any) {
-  http.put(`/admin/prompts/${row.id}/default`).then(() => {
+async function handleSetDefault(row: any) {
+  try {
+    await http.put(`/admin/prompts/${row.id}/default`);
     ElMessage.success(t("_common.setDefaultSuccess"));
     fetchList();
-  });
+  } catch (err: any) {
+    ElMessage.error(err?.message || t("_common.operationFailed"));
+  }
 }
 
-function handleDelete(row: any) {
-  ElMessageBox.confirm(t("_common.confirmDelete", { name: row.name }), t("_common.confirm"), { type: "warning" }).then(
-    () => {
-      http.delete(`/admin/prompts/${row.id}`).then(() => {
-        ElMessage.success(t("_common.deleteSuccess"));
-        fetchList();
-      });
-    }
-  );
+async function handleDelete(row: any) {
+  try {
+    await ElMessageBox.confirm(t("_common.confirmDelete", { name: row.name }), t("_common.confirm"), { type: "warning" });
+    await http.delete(`/admin/prompts/${row.id}`);
+    ElMessage.success(t("_common.deleteSuccess"));
+    fetchList();
+  } catch {
+    /* cancelled or error */
+  }
 }
 
 onMounted(fetchList);

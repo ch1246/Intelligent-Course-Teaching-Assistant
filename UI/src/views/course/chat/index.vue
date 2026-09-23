@@ -515,32 +515,58 @@ const handleCodeClick = (e: MouseEvent) => {
 };
 
 const renderMarkdown = (content: string): string => {
+  // Protect code blocks from other transforms
+  const codeBlocks: string[] = [];
   let html = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   // Code blocks ```language\n...```
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m: string, lang: string, code: string) => {
     const langLabel = lang || "text";
-    return `<div class="code-block-wrap" data-lang="${langLabel}"><div class="code-block-header"><span class="code-lang">${langLabel}</span><span class="code-actions"><span class="code-btn" data-action="copy" title="${t("_courseChat.copy")}">📋 ${t("_courseChat.copy")}</span><span class="code-btn" data-action="download" title="${t("_courseChat.download")}">⬇ ${t("_courseChat.download")}</span></span></div><pre class="code-block"><code>${code}</code></pre></div>`;
+    const placeholder = `__CODEBLOCK_${codeBlocks.length}__`;
+    codeBlocks.push(
+      `<div class="code-block-wrap" data-lang="${langLabel}"><div class="code-block-header"><span class="code-lang">${langLabel}</span><span class="code-actions"><span class="code-btn" data-action="copy" title="${t("_courseChat.copy")}">📋 ${t("_courseChat.copy")}</span><span class="code-btn" data-action="download" title="${t("_courseChat.download")}">⬇ ${t("_courseChat.download")}</span></span></div><pre class="code-block"><code>${code}</code></pre></div>`
+    );
+    return placeholder;
   });
   // Inline code `code`
   html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
   // Bold **text**
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
   // Block LaTeX $$...$$ → KaTeX rendered
   html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_m: string, tex: string) => {
     try {
-      return `<span class="latex-block">${katex.renderToString(tex.trim(), { throwOnError: false, displayMode: true })}</span>`;
+      return `<div class="latex-block">${katex.renderToString(tex.trim(), { throwOnError: false, displayMode: true, strict: false })}</div>`;
     } catch {
-      return `<span class="latex-block">$$${tex}$$</span>`;
+      return `<div class="latex-block latex-error">$$${tex}$$</div>`;
     }
   });
-  // Inline LaTeX $...$ → KaTeX rendered
-  html = html.replace(/\$(.+?)\$/g, (_m: string, tex: string) => {
+  // Inline LaTeX $...$ → KaTeX rendered (avoid matching escaped \$ or currency)
+  html = html.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\d)/g, (_m: string, tex: string) => {
     try {
-      return `<span class="latex-inline">${katex.renderToString(tex.trim(), { throwOnError: false })}</span>`;
+      return `<span class="latex-inline">${katex.renderToString(tex.trim(), { throwOnError: false, strict: false })}</span>`;
     } catch {
       return `<span class="latex-inline">$${tex}$</span>`;
     }
+  });
+
+  // Unordered lists
+  html = html.replace(/(?:^|\n)((?:[\t ]*[-*+][\s\S]+?\n?)+)/g, (_m: string, list: string) => {
+    const items = list
+      .split(/\n/)
+      .filter((l: string) => /^[\t ]*[-*+]\s/.test(l))
+      .map((l: string) => `<li>${l.replace(/^[\t ]*[-*+]\s/, "")}</li>`)
+      .join("");
+    return `<ul class="md-list">${items}</ul>`;
+  });
+  // Ordered lists
+  html = html.replace(/(?:^|\n)((?:[\t ]*\d+\.[\s\S]+?\n?)+)/g, (_m: string, list: string) => {
+    const items = list
+      .split(/\n/)
+      .filter((l: string) => /^[\t ]*\d+\.\s/.test(l))
+      .map((l: string) => `<li>${l.replace(/^[\t ]*\d+\.\s/, "")}</li>`)
+      .join("");
+    return `<ol class="md-list">${items}</ol>`;
   });
   // Line breaks
   html = html.replace(/\n/g, "<br>");
@@ -548,6 +574,11 @@ const renderMarkdown = (content: string): string => {
   html = html.replace(/^### (.+)$/gm, '<h4 class="md-heading">$1</h4>');
   html = html.replace(/^## (.+)$/gm, '<h3 class="md-heading">$1</h3>');
   html = html.replace(/^# (.+)$/gm, '<h2 class="md-heading">$1</h2>');
+
+  // Restore code blocks
+  codeBlocks.forEach((block, i) => {
+    html = html.replace(`__CODEBLOCK_${i}__`, block);
+  });
 
   return html;
 };
@@ -1566,15 +1597,32 @@ const onClickFab = () => {
       :deep(.latex-block) {
         display: block;
         text-align: center;
-        padding: 14px 8px;
-        margin: 10px 0;
+        padding: 16px 12px;
+        margin: 12px 0;
         overflow-x: auto;
-        font-size: 1.05em;
+        font-size: 1.1em;
+        background: color-mix(in srgb, var(--tk-color-primary) 4%, transparent);
+        border-radius: 8px;
+        border: 1px solid color-mix(in srgb, var(--tk-color-primary) 12%, transparent);
+        .katex-display {
+          margin: 0;
+        }
+        .katex {
+          font-size: 1.1em;
+        }
       }
       :deep(.latex-inline) {
         display: inline;
         font-size: 1em;
         padding: 0 2px;
+        .katex {
+          font-size: 1em;
+        }
+      }
+      :deep(.latex-error) {
+        color: var(--tk-color-danger);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.9em;
       }
       :deep(.md-heading) {
         margin: 12px 0 6px;
@@ -1582,6 +1630,15 @@ const onClickFab = () => {
         color: var(--tk-gray-color-900);
         &:first-child {
           margin-top: 0;
+        }
+      }
+      :deep(.md-list) {
+        margin: 8px 0;
+        padding-left: 24px;
+        li {
+          margin: 4px 0;
+          line-height: 1.6;
+          color: var(--tk-gray-color-800);
         }
       }
     }

@@ -42,6 +42,8 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
+    if overlap >= chunk_size:
+        overlap = chunk_size // 5
     chunks = []
     start = 0
     while start < len(text):
@@ -113,11 +115,13 @@ def index_documents(
 
 
 def delete_collection(collection_name: str):
+    import logging
+    logger = logging.getLogger(__name__)
     client = get_chroma_client()
     try:
         client.delete_collection(name=collection_name)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to delete collection '{collection_name}': {e}")
 
 
 # ── Document Summarization ─────────────────────────────
@@ -147,8 +151,6 @@ async def summarize_document(
 请直接给出总结，不要加前缀说明。"""
 
     clean_url = base_url.rstrip("/")
-    if clean_url.endswith("/v1"):
-        clean_url = clean_url[:-3].rstrip("/")
     client = AsyncOpenAI(base_url=clean_url, api_key=api_key)
     response = await client.chat.completions.create(
         model=model,
@@ -170,10 +172,7 @@ async def chat_stream_structured(
     max_tokens: int = 2048,
 ) -> AsyncGenerator[dict, None]:
     """Stream chat completion with structured events."""
-    # OpenAI SDK 会自动拼接 /v1，如果用户已配置含 /v1 的 URL，需要去掉尾部
     clean_url = base_url.rstrip("/")
-    if clean_url.endswith("/v1"):
-        clean_url = clean_url[:-3].rstrip("/")
     client = AsyncOpenAI(base_url=clean_url, api_key=api_key)
     stream = await client.chat.completions.create(
         model=model,

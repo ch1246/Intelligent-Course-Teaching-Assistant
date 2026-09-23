@@ -7,11 +7,7 @@ import { Tooltip } from "@/components";
 import { useNamespace } from "@/composables";
 import { useMessageStore } from "@/pinia";
 import { t } from "@/common/languages";
-import message1 from "@/common/assets/images/message/msg01.png";
 import message2 from "@/common/assets/images/message/msg02.png";
-import message3 from "@/common/assets/images/message/msg03.png";
-import message4 from "@/common/assets/images/message/msg04.png";
-import message5 from "@/common/assets/images/message/msg05.png";
 import "./index.scss";
 
 defineOptions({ name: "Notification" });
@@ -51,75 +47,33 @@ const { unreadMessageList } = storeToRefs(messageStore);
 const ns = useNamespace("notification");
 const router = useRouter();
 
-onMounted(() => {
+onMounted(async () => {
   // 请求获取消息列表
-  messageStore.getMessageList();
+  await messageStore.getMessageList();
+  // 将未读消息同步到通知列表
+  noticeList.value = unreadMessageList.value.map((item, idx) => ({
+    id: item.id || String(idx),
+    title: item.title,
+    description: item.description,
+    date: item.createTime,
+  }));
 });
 
 /**
- * 通知列表
+ * 通知列表 — 从消息 API 获取真实数据
  */
-const noticeList: Notice[] = [
-  { id: "1", avatar: message1, title: t("_headerBar.noticeWeeklyReport"), date: t("_headerBar.timeOneMinuteAgo") },
-  { id: "2", avatar: message2, title: t("_headerBar.noticeFourMeetings"), date: t("_headerBar.timeOneHourAgo") },
-  { id: "3", avatar: message3, title: t("_headerBar.noticeFrontendInterview"), date: t("_headerBar.timeOneDayAgo") },
-  {
-    id: "4",
-    avatar: message4,
-    title: t("_headerBar.noticeConsumptionDrill"),
-    date: t("_headerBar.timeOneWeekAgo"),
-  },
-  { id: "5", avatar: message5, title: t("_headerBar.noticeTalentAward"), date: "2023-01-01" },
-];
+const noticeList = ref<Notice[]>([]);
 
 /**
- * 代办列表
+ * 待办列表 — 暂无后端 API，显示空状态
  */
-const arList: Notice[] = [
-  {
-    id: "1",
-    title: t("_headerBar.todoTeekDesign"),
-    description: t("_headerBar.todoTeekDesign"),
-    tag: [
-      { name: t("_headerBar.priorityHigh"), type: "danger" },
-      { name: t("_headerBar.tagExpired", { n: 7 }), type: "danger" },
-    ],
-    date: "2099-12-31",
-  },
-  {
-    id: "2",
-    title: t("_headerBar.todoItReviewMeeting"),
-    description: t("_headerBar.todoItMeetingDesc"),
-    tag: [
-      { name: t("_headerBar.priorityMedium"), type: "warning" },
-      { name: t("_headerBar.tagInProgress"), type: "primary" },
-    ],
-    date: "2023-09-15",
-  },
-  {
-    id: "3",
-    title: t("_headerBar.notice"),
-    description: t("_headerBar.todoApiGateway"),
-    tag: [
-      { name: t("_headerBar.priorityLow"), type: "info" },
-      { name: t("_headerBar.tagDaysUntilOverdue", { n: 2 }), type: "warning" },
-    ],
-    date: "2023-12-31",
-  },
-  {
-    id: "4",
-    title: t("_headerBar.todoDevelopEts"),
-    description: t("_headerBar.todoEtsDesc"),
-    tag: [{ name: t("_headerBar.priorityHigh"), type: "danger" }],
-    date: "2023-07-27",
-  },
-];
+const arList = ref<Notice[]>([]);
 
 const activeName = ref("notice");
 
 // 标签列表
 const tabList = computed<TabInfo[]>(() => [
-  { name: "notice", label: t("_headerBar.notice"), data: noticeList },
+  { name: "notice", label: t("_headerBar.notice"), data: noticeList.value },
   {
     name: "message",
     label: t("_headerBar.message"),
@@ -128,7 +82,7 @@ const tabList = computed<TabInfo[]>(() => [
       return item;
     }),
   },
-  { name: "ar", label: t("_headerBar.todo"), data: arList },
+  { name: "ar", label: t("_headerBar.todo"), data: arList.value },
 ]);
 
 /**
