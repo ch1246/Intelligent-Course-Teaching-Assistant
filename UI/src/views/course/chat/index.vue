@@ -8,7 +8,8 @@ import {
   Download,
   Refresh,
   Plus,
-  Stop,
+  // 注意：@element-plus/icons-vue 没有 Stop 图标，用 VideoPause 表达「停止输出」
+  VideoPause,
   ChatDotRound,
   Edit,
   Monitor,
@@ -1088,7 +1089,7 @@ const onClickFab = () => {
           :title="$t('_courseChat.stopGenerate')"
           @click="stopGeneration"
         >
-          <el-icon :size="16"><Stop /></el-icon>
+          <el-icon :size="16"><VideoPause /></el-icon>
         </button>
         <button v-else class="send-btn" @click="sendMessage">
           <el-icon :size="18"><Promotion /></el-icon>
