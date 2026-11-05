@@ -1,18 +1,39 @@
-﻿from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view
 from .models import SystemSetting, AgentAPIConfig
 from .serializers import SystemSettingSerializer, AgentAPIConfigSerializer
 from accounts.views import make_response
 from accounts.models import User
+from services.default_flag import set_default_atomically
 
 
 # ── System Settings ───────────────────────────────────
 
+# 安全：非管理员读取系统设置时只返回这些「公开配置」，避免把可能存放凭证/密钥的项暴露出去。
+# 新增敏感配置项（如 SMTP 密码）不要加进这个集合。
+PUBLIC_SETTING_KEYS = {
+    "site_name",
+    "site_description",
+    "default_language",
+    "max_upload_size_mb",
+    "maintenance_mode",
+    "enable_registration",
+}
+
+
 @api_view(["GET", "PUT"])
 def system_settings(request):
+    is_admin = request.user.role == User.Role.ADMIN
+
     if request.method == "GET":
-        settings = SystemSetting.objects.all()
-        return make_response(data=SystemSettingSerializer(settings, many=True).data)
-    # PUT: bulk update
+        # 读：管理员拿全量；其他登录用户只拿公开白名单
+        qs = SystemSetting.objects.all()
+        if not is_admin:
+            qs = qs.filter(key__in=PUBLIC_SETTING_KEYS)
+        return make_response(data=SystemSettingSerializer(qs, many=True).data)
+
+    # PUT: bulk update —— 安全：只有管理员可以修改系统配置
+    if not is_admin:
+        return make_response(code=403, message="无权限", http_status=403)
     data = request.data
     if isinstance(data, list):
         for item in data:
@@ -42,7 +63,7 @@ def agent_api_config_list(request):
         return make_response(code=400, message=str(ser.errors), http_status=400)
     config = ser.save(created_by=request.user)
     if config.is_default:
-        AgentAPIConfig.objects.exclude(pk=config.pk).update(is_default=False)
+        set_default_atomically(config)
     return make_response(data=AgentAPIConfigSerializer(config).data)
 
 
@@ -69,7 +90,7 @@ def agent_api_config_detail(request, pk):
             return make_response(code=400, message=str(ser.errors), http_status=400)
         config = ser.save()
         if config.is_default:
-            AgentAPIConfig.objects.exclude(pk=config.pk).update(is_default=False)
+            set_default_atomically(config)
         return make_response(data=AgentAPIConfigSerializer(config).data)
     else:
         config.delete()
@@ -85,7 +106,6 @@ def set_default_config(request, pk):
         config = AgentAPIConfig.objects.get(pk=pk)
     except AgentAPIConfig.DoesNotExist:
         return make_response(code=404, message="配置不存在", http_status=404)
-    AgentAPIConfig.objects.all().update(is_default=False)
-    config.is_default = True
-    config.save(update_fields=["is_default"])
+    # 全局互斥：行锁 + 事务避免并发产生 0 条或 2 条默认
+    set_default_atomically(config)
     return make_response(data=AgentAPIConfigSerializer(config).data)

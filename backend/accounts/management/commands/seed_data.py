@@ -1,4 +1,4 @@
-﻿"""
+"""
 Seed the database with realistic mock data for development and demo.
 Run: python manage.py seed_data
 """
@@ -497,103 +497,22 @@ class Command(BaseCommand):
 
     def _seed_prompt_templates(self):
         from prompt_engine.models import PromptTemplate, PromptVersion
+        from services.prompt_files import load_db_templates
 
         if PromptTemplate.objects.exists():
             self.stdout.write(f'  [SKIP] Prompt templates: {PromptTemplate.objects.count()} (skipped)')
             return
 
         admin = User.objects.filter(role=User.Role.ADMIN).first()
+        # 模板正文维护在 docs/prompts/templates/*.md，这里是唯一出处；
+        # 不要再往本文件里硬编码提示词文本。
         templates = [
             {
-                "name": "默认问答助手", "skill": "qa", "is_default": True,
-                "content": """你是"{{ course_name }}"课程的AI教学助手。请根据提供的课程资料回答学生问题。
-
-要求：
-- 优先使用【参考资料】中的内容回答
-- 如果资料中没有相关信息，请如实告知
-- 回答要有条理，使用标题和列表组织内容
-- 对关键概念给出清晰的定义和解释
-- 如有公式，用 LaTeX $$...$$ 格式呈现
-- 结尾可追问学生是否还有疑问
-
-{{ memory_prompt }}
-
-【参考资料】
-{{ retrieval_docs }}
-
-【学生问题】
-{{ user_question }}""",
-            },
-            {
-                "name": "默认公式推导", "skill": "formula", "is_default": True,
-                "content": """你是"{{ course_name }}"课程的公式推导助手。
-
-要求：
-- 逐步推导相关公式，每个步骤都要解释
-- 使用 LaTeX $$...$$ 格式呈现公式
-- 说明每个步骤的物理/数学意义
-
-{{ memory_prompt }}
-
-【参考资料】
-{{ retrieval_docs }}
-
-【学生问题】
-{{ user_question }}""",
-            },
-            {
-                "name": "默认代码调试", "skill": "code_debug", "is_default": True,
-                "content": """你是"{{ course_name }}"课程的代码调试助手。
-
-要求：
-- 先分析代码的逻辑和潜在问题
-- 给出修正后的代码（用 ``` 代码块包裹）
-- 解释修改的原因
-
-{{ memory_prompt }}
-
-【参考资料】
-{{ retrieval_docs }}
-
-【学生问题】
-{{ user_question }}""",
-            },
-            {
-                "name": "默认实验指导", "skill": "lab_guide", "is_default": True,
-                "content": """你是"{{ course_name }}"课程的实验指导助手。
-
-要求：
-- 给出清晰的实验步骤（1. 2. 3.）
-- 标注每个步骤的注意事项
-- 说明预期结果和可能的错误
-
-{{ memory_prompt }}
-
-【参考资料】
-{{ retrieval_docs }}
-
-【学生问题】
-{{ user_question }}""",
-            },
-            {
-                "name": "默认论文阅读", "skill": "paper_reader", "is_default": True,
-                "content": """你是"{{ course_name }}"课程的论文阅读助手。
-
-要求：
-- 提炼论文的核心贡献和创新点
-- 解释关键技术方法
-- 分析实验设计和结果
-
-{{ memory_prompt }}
-
-【参考资料】
-{{ retrieval_docs }}
-
-【学生问题】
-{{ user_question }}""",
-            },
+                "name": t["name"], "skill": t["skill"],
+                "is_default": t["is_default"], "content": t["content"],
+            }
+            for t in load_db_templates()
         ]
-
         for td in templates:
             tmpl = PromptTemplate.objects.create(
                 name=td["name"], skill=td["skill"], content=td["content"],

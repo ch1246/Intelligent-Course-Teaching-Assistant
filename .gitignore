@@ -1,13 +1,15 @@
-﻿# Python / Django
+# Python / Django
 backend/.venv/
 backend/chroma_data/
 backend/media/
 *.py[cod]
 __pycache__/
 
-# Node / Frontend
+# Node / Frontend（构建产物不入库）
 UI/node_modules/
 UI/dist/
+UI/build/
+UI/.dist-verify/
 
 # IDE
 .idea/
@@ -26,5 +28,11 @@ UI/dist/
 .DS_Store
 Thumbs.db
 
-# Docs (not committed)
-docs/
+# 无关的第三方仓库 / 生成产物
+berkeley-stat-157/
+preview-v2/
+
+# 文档：项目笔记不入库，但提示词模板必须入库
+# （docs/prompts/ 是提示词的唯一出处，要跟代码一起版本化）
+docs/*
+!docs/prompts/

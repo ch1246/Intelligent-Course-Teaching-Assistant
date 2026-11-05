@@ -63,7 +63,9 @@ class RegisterSerializer(serializers.Serializer):
     grade = serializers.CharField(required=True, max_length=50, help_text="年级，如 2024级")
     phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
     email = serializers.EmailField(required=False, allow_blank=True)
-    role = serializers.ChoiceField(choices=User.Role.choices, default=User.Role.STUDENT)
+    # 安全：这里刻意不声明 role 字段（DRF 会忽略未声明的入参）。
+    # 自助注册一律是学生，服务端在 register 视图里强制 role=STUDENT；
+    # 教师/管理员账号只能由管理员通过 /api/admin/users 创建，或由 seed_data 生成。
 
 
 class ChangePasswordSerializer(serializers.Serializer):

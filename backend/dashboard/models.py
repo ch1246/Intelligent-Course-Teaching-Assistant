@@ -18,6 +18,15 @@ class LearningRecord(models.Model):
         verbose_name = '学习记录'
         verbose_name_plural = verbose_name
         ordering = ['-date']
+        # 覆盖索引：学习时长相关的查询固定按 (用户, 课程) 过滤，再按 date 排序/取区间。
+        # 把 date 与 duration_seconds 放进索引尾部，SUM 与列表查询都能走 "Using index"，
+        # 既避免 index_merge 回表，也消除 ORDER BY date DESC 的 filesort。
+        indexes = [
+            models.Index(
+                fields=['user', 'course', 'date', 'duration_seconds'],
+                name='idx_lr_user_course_date_dur',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.user.username} - {self.course.name} - {self.date}'

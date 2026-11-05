@@ -1,4 +1,4 @@
-﻿from django.db import models
+from django.db import models
 from django.conf import settings
 
 
@@ -51,6 +51,32 @@ class Course(models.Model):
 
     def __str__(self):
         return self.name
+
+
+def annotate_course_counts(queryset):
+    """把列表页要用的三个计数一次性打进查询。
+
+    列表页的 ``enrolled_count`` / ``files_count`` / ``total_messages`` 此前是
+    序列化时逐行查库（每行 3 次 COUNT）——20 门课就是 60 次查询。这里用
+    ``annotate`` + ``Count(distinct=True)`` 合成一条带 GROUP BY 的 SQL。
+
+    ``distinct=True`` 是必须的：三个计数各自沿不同的多值关联展开，join 会
+    让行数相乘，不去重就会算出虚高数字。
+
+    序列化器优先读这些注解值；单条记录的详情视图不调用本函数时，序列化器会
+    回落到逐条查询，行为不变。
+    """
+    from django.db.models import Count, Q
+
+    return queryset.select_related("teacher").annotate(
+        annotated_enrolled_count=Count(
+            "enrollments",
+            filter=Q(enrollments__status="approved"),
+            distinct=True,
+        ),
+        annotated_files_count=Count("files", distinct=True),
+        annotated_total_messages=Count("chat_sessions__messages", distinct=True),
+    )
 
 
 WEEKDAYS = [

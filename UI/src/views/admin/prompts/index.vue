@@ -187,7 +187,9 @@ async function handleSetDefault(row: any) {
 
 async function handleDelete(row: any) {
   try {
-    await ElMessageBox.confirm(t("_common.confirmDelete", { name: row.name }), t("_common.confirm"), { type: "warning" });
+    await ElMessageBox.confirm(t("_common.confirmDelete", { name: row.name }), t("_common.confirm"), {
+      type: "warning",
+    });
     await http.delete(`/admin/prompts/${row.id}`);
     ElMessage.success(t("_common.deleteSuccess"));
     fetchList();

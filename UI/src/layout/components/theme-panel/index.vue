@@ -7,7 +7,7 @@ import { LOGIN_URL, OpenThemePanelKey } from "@/common/config";
 import { mittBus } from "@/common/utils";
 import { useCommon, useNamespace, useTheme } from "@/composables";
 import { useSettingStore, useUserStore } from "@/pinia";
-import { GlobalTheme, MenuTheme, BaseConfig, BrowserTitle } from "./components";
+import { GlobalTheme } from "./components"; // MenuTheme / BaseConfig / BrowserTitle 在下方模板里被注释掉了，需要时再引入
 
 import "./index.scss";
 import router from "@/router";

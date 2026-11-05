@@ -48,6 +48,28 @@ const form = reactive({
 });
 
 const courseOptions = ref<{ id: number; name: string }[]>([]);
+
+// 取知识库所属课程 id（兼容 col.course 为数字或 {id, name} 对象两种形态）
+const getCollectionCourseId = (col: VectorCollection): number | null => {
+  const course = col.course as { id: number } | number | null;
+  return typeof course === "number" ? course : (course?.id ?? null);
+};
+
+// 课程下拉可选项：排除已有知识库的课程；编辑态保留当前记录自己所属的课程
+const selectableCourseOptions = computed(() => {
+  const occupiedIds = new Set<number>();
+  for (const col of collections.value) {
+    const courseId = getCollectionCourseId(col);
+    if (courseId !== null) occupiedIds.add(courseId);
+  }
+  if (editingId.value !== null) {
+    const current = collections.value.find(c => c.id === editingId.value);
+    const currentCourseId = current ? getCollectionCourseId(current) : null;
+    if (currentCourseId !== null) occupiedIds.delete(currentCourseId);
+  }
+  return courseOptions.value.filter(c => !occupiedIds.has(c.id));
+});
+
 const modelOptions = [
   { label: "text-embedding-3-large (3072维)", value: "text-embedding-3-large" },
   { label: "text-embedding-3-small (1536维)", value: "text-embedding-3-small" },
@@ -242,7 +264,6 @@ const formatDate = (dateStr: string) => {
 const uploading = ref(false);
 const uploadDialogVisible = ref(false);
 const uploadSelectedCollectionId = ref<number | null>(null);
-let pendingFile: File | null = null;
 
 const openUploadDialog = () => {
   uploadSelectedCollectionId.value = collections.value.length > 0 ? collections.value[0].id : null;
@@ -395,9 +416,7 @@ const confirmUploadCollection = () => {
           <el-button :icon="Refresh" text @click="handleRefresh">
             {{ $t("_common.refresh") }}
           </el-button>
-          <el-button :icon="Upload" type="success" :loading="uploading" @click="handleUpload()">
-            上传文档
-          </el-button>
+          <el-button :icon="Upload" type="success" :loading="uploading" @click="handleUpload()">上传文档</el-button>
           <el-button :icon="Plus" type="primary" @click="openCreateDialog">
             {{ $t("_adminVectorDB.createCollection") }}
           </el-button>
@@ -462,9 +481,7 @@ const confirmUploadCollection = () => {
             <el-button link type="primary" size="small" :icon="Plus" @click="openEditDialog(row)">
               {{ $t("_common.edit") }}
             </el-button>
-            <el-button link type="success" size="small" :icon="Upload" @click="handleUpload(row)">
-              上传
-            </el-button>
+            <el-button link type="success" size="small" :icon="Upload" @click="handleUpload(row)">上传</el-button>
             <el-button link type="warning" size="small" :loading="row.status === 'indexing'" @click="reindex(row)">
               {{ $t("_adminVectorDB.rebuildIndex") }}
             </el-button>
@@ -502,7 +519,7 @@ const confirmUploadCollection = () => {
         </el-form-item>
         <el-form-item :label="$t('_adminVectorDB.course')" prop="course_id">
           <el-select v-model="form.course_id" :placeholder="$t('_adminVectorDB.coursePlaceholder')" style="width: 100%">
-            <el-option v-for="c in courseOptions" :key="c.id" :label="c.name" :value="c.id" />
+            <el-option v-for="c in selectableCourseOptions" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('_adminVectorDB.embeddingModel')" prop="embeddingModel">
@@ -543,14 +560,12 @@ const confirmUploadCollection = () => {
           </el-select>
         </el-form-item>
         <el-form-item label="文件格式">
-          <span style="color: var(--tk-gray-color-500); font-size: 13px;">支持 PDF、Word、PPT、Markdown、TXT</span>
+          <span style="color: var(--tk-gray-color-500); font-size: 13px">支持 PDF、Word、PPT、Markdown、TXT</span>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="uploadDialogVisible = false">取消</el-button>
-        <el-button type="success" :loading="uploading" @click="confirmUploadCollection">
-          选择文件并上传
-        </el-button>
+        <el-button type="success" :loading="uploading" @click="confirmUploadCollection">选择文件并上传</el-button>
       </template>
     </el-dialog>
   </div>

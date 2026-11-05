@@ -94,4 +94,3 @@ const processError = (error: AxiosError) => {
     hasRead: false,
   };
 };
-

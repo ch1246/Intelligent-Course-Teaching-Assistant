@@ -1,8 +1,10 @@
-﻿from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view
 from .models import ContextStrategy
 from .serializers import ContextStrategySerializer
 from accounts.views import make_response
 from accounts.models import User
+from services.default_flag import set_default_atomically
+from services.pagination import parse_paging
 
 
 @api_view(["GET", "POST"])
@@ -11,8 +13,7 @@ def strategy_list(request):
         return make_response(code=403, message="无权限", http_status=403)
     if request.method == "GET":
         qs = ContextStrategy.objects.select_related("created_by").order_by("-is_default", "-updated_at")
-        page = int(request.GET.get("page", 1))
-        size = int(request.GET.get("pageSize", 20))
+        page, size = parse_paging(request)
         total = qs.count()
         data = qs[(page - 1) * size: page * size]
         return make_response(data={
@@ -25,7 +26,7 @@ def strategy_list(request):
         return make_response(code=400, message=str(ser.errors), http_status=400)
     strategy = ser.save(created_by=request.user)
     if strategy.is_default:
-        ContextStrategy.objects.exclude(pk=strategy.pk).update(is_default=False)
+        set_default_atomically(strategy)
     return make_response(data=ContextStrategySerializer(strategy).data)
 
 
@@ -45,7 +46,7 @@ def strategy_detail(request, pk):
             return make_response(code=400, message=str(ser.errors), http_status=400)
         strategy = ser.save()
         if strategy.is_default:
-            ContextStrategy.objects.exclude(pk=strategy.pk).update(is_default=False)
+            set_default_atomically(strategy)
         return make_response(data=ContextStrategySerializer(strategy).data)
     else:
         strategy.delete()
@@ -60,7 +61,6 @@ def strategy_set_default(request, pk):
         strategy = ContextStrategy.objects.get(pk=pk)
     except ContextStrategy.DoesNotExist:
         return make_response(code=404, message="策略不存在", http_status=404)
-    ContextStrategy.objects.all().update(is_default=False)
-    strategy.is_default = True
-    strategy.save(update_fields=["is_default"])
+    # 全局互斥：行锁 + 事务避免并发产生 0 条或 2 条默认
+    set_default_atomically(strategy)
     return make_response(data=ContextStrategySerializer(strategy).data)

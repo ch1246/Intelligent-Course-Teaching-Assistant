@@ -1,4 +1,4 @@
-﻿from django.db.models import Q
+from django.db.models import Q
 from rest_framework.decorators import api_view
 from .models import PromptTemplate, PromptVersion
 from .serializers import (
@@ -7,6 +7,9 @@ from .serializers import (
 )
 from accounts.views import make_response
 from accounts.models import User
+from services.default_flag import set_default_atomically
+from services.pagination import parse_paging
+from services.search import search_filter
 
 # ── Template CRUD ─────────────────────────────────────
 
@@ -21,9 +24,8 @@ def template_list(request):
             qs = qs.filter(skill=skill)
         keyword = request.GET.get("keyword")
         if keyword:
-            qs = qs.filter(Q(name__icontains=keyword) | Q(description__icontains=keyword))
-        page = int(request.GET.get("page", 1))
-        size = int(request.GET.get("pageSize", 20))
+            qs = search_filter(qs, keyword, "prompt")
+        page, size = parse_paging(request)
         total = qs.count()
         data = qs[(page - 1) * size: page * size]
         return make_response(data={
@@ -42,7 +44,7 @@ def template_list(request):
         created_by=request.user,
     )
     if tmpl.is_default:
-        PromptTemplate.objects.filter(skill=tmpl.skill).exclude(pk=tmpl.pk).update(is_default=False)
+        set_default_atomically(tmpl, scope={"skill": tmpl.skill})
     return make_response(data=PromptTemplateDetailSerializer(tmpl).data)
 
 
@@ -72,7 +74,7 @@ def template_detail(request, pk):
                 created_by=request.user,
             )
         if tmpl.is_default:
-            PromptTemplate.objects.filter(skill=tmpl.skill).exclude(pk=tmpl.pk).update(is_default=False)
+            set_default_atomically(tmpl, scope={"skill": tmpl.skill})
         return make_response(data=PromptTemplateDetailSerializer(tmpl).data)
     else:
         tmpl.delete()
@@ -151,7 +153,6 @@ def template_set_default(request, pk):
         tmpl = PromptTemplate.objects.get(pk=pk)
     except PromptTemplate.DoesNotExist:
         return make_response(code=404, message="模板不存在", http_status=404)
-    PromptTemplate.objects.filter(skill=tmpl.skill).update(is_default=False)
-    tmpl.is_default = True
-    tmpl.save(update_fields=["is_default"])
+    # 按 skill 互斥：同一技能下至多一条默认模板。行锁 + 事务避免并发产生 0/2 条默认
+    set_default_atomically(tmpl, scope={"skill": tmpl.skill})
     return make_response(data=PromptTemplateDetailSerializer(tmpl).data)

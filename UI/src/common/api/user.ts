@@ -4,7 +4,6 @@ import { http } from "@/common/http";
 export interface LoginParams {
   username: string;
   password: string;
-  verifyCode?: string;
 }
 
 export interface Token {

@@ -1,4 +1,4 @@
-﻿from django.db import models
+from django.db import models
 from django.conf import settings
 from .encryption import encrypt_value, decrypt_value, is_encrypted
 
@@ -24,7 +24,11 @@ class AgentAPIConfig(models.Model):
     api_key = models.CharField(max_length=500, verbose_name="API 密钥")
     model_list = models.JSONField(default=list, verbose_name="模型列表")
     default_model = models.CharField(max_length=100, blank=True, default="", verbose_name="默认模型")
-    system_prompt = models.TextField(blank=True, default="", verbose_name="全局兜底 System Prompt")
+    system_prompt = models.TextField(
+        blank=True, default="",
+        verbose_name="全局 System Prompt",
+        help_text="拼在每次问答的 system prompt 最前面，无论用哪套技能模板都生效；留空则不加。",
+    )
     prompt_template = models.ForeignKey(
         "prompt_engine.PromptTemplate", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="agent_configs", verbose_name="关联提示词模板"

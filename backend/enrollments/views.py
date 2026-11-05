@@ -1,17 +1,24 @@
-﻿from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view
 from django.utils import timezone
 from .models import Enrollment
 from .serializers import EnrollmentSerializer
 from accounts.views import make_response
 from accounts.models import User
 from courses.models import Course
+from services.pagination import parse_paging
 
 
 # ── Student: enroll ───────────────────────────────────
 
 @api_view(['GET', 'POST'])
 def enroll(request):
-    """Student views their enrollments or enrolls in a course."""
+    """Student views their enrollments or enrolls in a course.
+
+    选课是学生行为：只有学生能提交选课申请。旧实现不限角色，教师/管理员也能
+    往自己名下挂选课记录，污染课程的选课人数与审核队列。
+    """
+    if request.user.role != User.Role.STUDENT:
+        return make_response(code=403, message='只有学生可以选课', http_status=403)
     if request.method == 'GET':
         qs = request.user.enrollments.select_related('course').order_by('-enrolled_at')
         return make_response(data=EnrollmentSerializer(qs, many=True).data)
@@ -36,12 +43,14 @@ def admin_enroll_list(request):
     if request.user.role not in (User.Role.ADMIN, User.Role.TEACHER):
         return make_response(code=403, message='无权限', http_status=403)
     qs = Enrollment.objects.select_related('student', 'course').order_by('-enrolled_at')
+    # 教师只看自己授课课程的选课申请；管理员看全部
+    if request.user.role == User.Role.TEACHER:
+        qs = qs.filter(course__teacher=request.user)
     status_filter = request.GET.get('status', '')
     if status_filter and status_filter not in ('', 'undefined', 'null'):
         qs = qs.filter(status=status_filter)
     try:
-        page = int(request.GET.get('page', 1))
-        size = int(request.GET.get('pageSize', 20))
+        page, size = parse_paging(request)
     except (ValueError, TypeError):
         page, size = 1, 20
     total = qs.count()
@@ -60,6 +69,9 @@ def admin_enroll_review(request, pk):
         enrollment = Enrollment.objects.get(pk=pk)
     except Enrollment.DoesNotExist:
         return make_response(code=404, message='记录不存在', http_status=404)
+    # 归属校验：教师只能审核自己授课课程的选课申请
+    if request.user.role != User.Role.ADMIN and enrollment.course.teacher_id != request.user.id:
+        return make_response(code=403, message='无权审核其他教师课程的选课', http_status=403)
     status = request.data.get('status', '')
     if status not in ('approved', 'rejected'):
         return make_response(code=400, message='状态值无效', http_status=400)

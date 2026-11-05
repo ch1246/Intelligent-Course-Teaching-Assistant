@@ -4,7 +4,16 @@ Context Compressor — Token counting & budget-aware message compression.
 Ensures the assembled context (system prompt + retrieval docs + memory +
 history + user message) stays within the configured max_context_tokens budget.
 
-Compression priority (first to keep, last to drop):
+Compatibility note: the summary below was aspirational; the implementation actually
+drops in the order listed under "Actual drop order".
+
+Actual drop order (what the code does):
+  1. 最旧的历史消息（保留最后 1 轮）；``summarize`` 模式下先把它们压成抽取式摘要
+  2. 从 System Prompt 的**尾部**截断（模板里尾部通常是检索文档 → 再往前是学生画像）
+  3. 当前用户消息（保底：只有当剩余预算 > 50 token 时才截）
+  4. 核选项：system 截到预算一半 + 只保留最后一条消息
+
+Reference priority (first to keep, last to drop):
   1. System prompt skeleton (core instruction at the top)
   2. Current user message
   3. Student profile (memory_prompt)
@@ -81,7 +90,10 @@ def compress_messages(
     max_tokens : int
         Hard token cap for the entire messages array.
     compression_method : str
-        ``"truncate"`` (current implementation) or ``"summarize"`` (future).
+        ``"truncate"`` —— 直接丢弃最旧历史 / 从尾部硬截断（默认）；
+        ``"summarize"`` —— 丢弃前先把被丢的历史压成一段**抽取式**摘要（每条保留首句），
+        系统提示词也改成"整句装填"而不是切断句子。注意：抽取式摘要不调用 LLM，
+        因此零成本、可离线；若要做生成式摘要需另接模型。
 
     Returns
     -------
@@ -102,15 +114,46 @@ def compress_messages(
     history = list(messages[1:])  # copy so we can mutate
 
     # ── Step 1: drop oldest history messages (keep last 2 = 1 turn) ──
+    # summarize 模式：丢弃之前先把要丢的历史压成一段抽取式摘要保留下来
+    if compression_method == "summarize" and len(history) > 2:
+        kept = history[-2:]
+        dropped = history[:-2]
+        digest = _summarize_messages(dropped, max(48, budget // 8))
+        if digest:
+            digest_msg = {
+                "role": "system",
+                "content": f"【历史对话摘要（抽取式压缩，未调用 LLM）】\n{digest}",
+            }
+            candidate = [system_msg, digest_msg] + kept
+            if count_messages_tokens(candidate) <= budget:
+                logger.info(
+                    "Context compressed(summarize): %d 条历史 → 摘要 %d tokens，总计 %d tokens",
+                    len(dropped), count_tokens(digest), count_messages_tokens(candidate),
+                )
+                return candidate
+        history = kept
+
+    # ── Step 1b: 从最旧的历史开始丢，直到塞进预算 ──
+    # 每条消息的 token 只分词一次，之后增量扣减。旧实现每丢一条就对剩余
+    # 全量重新分词，长会话是 O(n²)：30 轮对话要重复分词几百次。
+    # 计数口径与 count_messages_tokens 保持一致：每条 content + 4 帧开销，请求级 +3。
+    system_cost = count_tokens(system_msg.get("content", "")) + 4
+    per_msg = [count_tokens(m.get("content", "")) + 4 for m in history]
+    history_cost = sum(per_msg)
+    request_overhead = 3
+
+    dropped_n = 0
     while len(history) > 2:
+        history_cost -= per_msg.pop(0)
         history.pop(0)
-        test = [system_msg] + history
-        if count_messages_tokens(test) <= budget:
+        dropped_n += 1
+        total_now = system_cost + history_cost + request_overhead
+        if total_now <= budget:
             logger.info(
                 "Context compressed: dropped %d history messages → %d messages, %d tokens",
-                len(messages) - len(test), len(test), count_messages_tokens(test),
+                dropped_n, len(history) + 1, total_now,
             )
-            return test
+            return [system_msg] + history
 
     # ── Step 2: truncate system prompt (tail = least-relevant docs) ──
     system_content = system_msg.get("content", "")
@@ -158,8 +201,65 @@ def compress_messages(
 
 # ── Internal helpers ───────────────────────────────────────────
 
-def _truncate_to_token_budget(text: str, max_tokens: int, method: str) -> str:
-    """Truncate *text* to *max_tokens*, trying natural break points."""
+def _summarize_messages(messages: list[dict], max_tokens: int, max_items: int = 8) -> str:
+    """把将被丢弃的历史压成一段抽取式摘要（每条按配额取首句，不调用 LLM）。
+
+    只摘要**最近** max_items 条被丢弃的消息（越靠近当前轮越相关），更早的直接省略
+    并注明条数，这样摘要本身也能稳定控制在上限内。
+    """
+    if not messages:
+        return ""
+
+    recent = messages[-max_items:]
+    omitted = len(messages) - len(recent)
+    per_item = max(10, (max_tokens - 12) // max(1, len(recent)) - 2)
+
+    lines: list[str] = []
+    if omitted > 0:
+        lines.append(f"（更早的 {omitted} 条历史已省略）")
+    for msg in recent:
+        role = "学生" if msg.get("role") == "user" else "助手"
+        content = re.sub(r"\s+", " ", (msg.get("content") or "")).strip()
+        if not content:
+            continue
+        head = _truncate_to_token_budget(content, per_item, "truncate")
+        suffix = "…" if len(head) < len(content) else ""
+        lines.append(f"{role}：{head}{suffix}")
+
+    if len(lines) <= (1 if omitted > 0 else 0):
+        return ""
+    return _truncate_to_token_budget("\n".join(lines), max_tokens, "truncate")
+
+
+def _pack_sentences(text: str, max_tokens: int) -> str:
+    """按整句贪心装填，尽量不把句子切断（summarize 模式用）。"""
+    sentences = [s for s in re.split(r"(?<=[。！？!?；;\n])", text) if s.strip()]
+    kept: list[str] = []
+    used = 0
+    for sentence in sentences:
+        tokens = count_tokens(sentence)
+        if used + tokens > max_tokens:
+            break
+        kept.append(sentence)
+        used += tokens
+    if not kept:
+        return ""
+    return "".join(kept).strip()
+
+
+def _truncate_to_token_budget(text: str, max_tokens: int, method: str = "truncate") -> str:
+    """Truncate *text* to *max_tokens*.
+
+    ``summarize`` 模式优先按整句装填（保住句子完整性），装不下再退回硬截断。
+    """
+    if count_tokens(text) <= max_tokens:
+        return text
+
+    if method == "summarize":
+        packed = _pack_sentences(text, max_tokens)
+        if packed:
+            return packed
+
     enc = _get_tokenizer()
 
     if enc:

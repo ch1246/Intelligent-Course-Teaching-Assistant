@@ -112,7 +112,8 @@ const currentThinking = ref<ThinkingData | null>(null);
 
 // ── API base ──────────────────────────────────────────
 
-const API_PREFIX = "/api";
+// 与 Axios 保持一致：优先取环境变量 VITE_API_URL，为空或未定义时兜底 "/api"
+const API_PREFIX = import.meta.env.VITE_API_URL || "/api";
 
 // ── Sessions ──────────────────────────────────────────
 
@@ -221,7 +222,9 @@ const authHeaders = (): Record<string, string> => {
 };
 
 /** 统一的 fetch 封装：自动处理 401 跳转登录 */
-const apiFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
+// options 的类型用 Parameters<typeof fetch>[1] 从 fetch 反推：直接写 DOM 全局类型
+// RequestInit 会触发 eslint 的 no-undef（该配置不认 TS 的类型命名空间）。
+const apiFetch = async (url: string, options: Parameters<typeof fetch>[1] = {}): Promise<Response> => {
   const res = await fetch(url, {
     ...options,
     headers: { ...authHeaders(), ...((options.headers as Record<string, string>) || {}) },

@@ -1,13 +1,26 @@
 from django.db import models
 
+from services.rag_service import collection_name_for_course
+
 
 class VectorCollection(models.Model):
+    """课程知识库记录。
+
+    **一门课一个知识库**：Chroma 的物理集合名由 ``collection_name`` 唯一决定
+    （``course_{course_id}``），与本表的 ``name`` 字段无关 —— ``name`` 只是给
+    人看的展示名。
+
+    早期版本没有这层约束，同一门课可以建多条记录，而它们全都映射到**同一个**
+    物理集合：删掉其中任意一条记录就会把整门课的向量库清空，reindex 也会互相
+    覆盖。这里用数据库唯一约束把该故障模式从结构上排除掉。
+    """
+
     class Status(models.TextChoices):
         ACTIVE = 'active', '活跃'
         INDEXING = 'indexing', '索引中'
         ERROR = 'error', '错误'
 
-    name = models.CharField(max_length=200, verbose_name='集合名称')
+    name = models.CharField(max_length=200, verbose_name='集合名称（展示名）')
     course = models.ForeignKey(
         'courses.Course', on_delete=models.CASCADE, related_name='vector_collections', verbose_name='所属课程'
     )
@@ -28,6 +41,14 @@ class VectorCollection(models.Model):
         verbose_name = '向量集合'
         verbose_name_plural = verbose_name
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['course'], name='uniq_vector_collection_per_course'),
+        ]
+
+    @property
+    def collection_name(self) -> str:
+        """Chroma 物理集合名。全项目唯一出处在 services.rag_service。"""
+        return collection_name_for_course(self.course_id)
 
     def __str__(self):
         return f'{self.name} ({self.course.name})'

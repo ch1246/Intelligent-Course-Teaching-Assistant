@@ -42,21 +42,22 @@ class CourseSerializer(serializers.ModelSerializer):
         return obj.teacher.username if obj.teacher else ""
 
     def get_enrolled_count(self, obj):
-        try:
-            return obj.enrolled_count
-        except Exception:
-            return 0
+        # 列表视图会走 annotate_course_counts() 注入该值（一条 GROUP BY 查全表）；
+        # 详情视图没注解时回落到模型属性，逐条查。吞掉异常返回 0 会把「查不出」
+        # 伪装成「没有」，所以这里不兜异常。
+        annotated = getattr(obj, "annotated_enrolled_count", None)
+        return obj.enrolled_count if annotated is None else annotated
 
     def get_files_count(self, obj):
-        try:
-            from files_app.models import UploadedFile
-            return UploadedFile.objects.filter(course=obj).count()
-        except Exception:
-            return 0
+        annotated = getattr(obj, "annotated_files_count", None)
+        if annotated is not None:
+            return annotated
+        from files_app.models import UploadedFile
+        return UploadedFile.objects.filter(course=obj).count()
 
     def get_total_messages(self, obj):
-        try:
-            from chat.models import ChatMessage
-            return ChatMessage.objects.filter(session__course=obj).count()
-        except Exception:
-            return 0
+        annotated = getattr(obj, "annotated_total_messages", None)
+        if annotated is not None:
+            return annotated
+        from chat.models import ChatMessage
+        return ChatMessage.objects.filter(session__course=obj).count()

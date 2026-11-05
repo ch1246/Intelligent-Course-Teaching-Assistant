@@ -1,4 +1,4 @@
-﻿import os
+import os
 import uuid
 from django.conf import settings
 from rest_framework.decorators import api_view
@@ -6,6 +6,20 @@ from .models import UploadedFile
 from .serializers import UploadedFileSerializer
 from accounts.views import make_response
 from accounts.models import User
+from services.pagination import parse_paging
+
+
+def _can_access_file(user, uf) -> bool:
+    """文件访问权限：admin / 上传者本人 / 该文件所属课程的授课教师。
+
+    此前 GET /api/files/<pk> 只要求登录，任何用户都能读到别人的文件元数据
+    （其中包含服务端绝对路径 stored_path）。
+    """
+    if user.role == User.Role.ADMIN:
+        return True
+    if uf.uploader_id == user.id:
+        return True
+    return bool(uf.course_id and uf.course and uf.course.teacher_id == user.id)
 
 
 @api_view(['GET', 'POST'])
@@ -15,8 +29,7 @@ def file_list(request):
         course_id = request.GET.get('course_id')
         if course_id:
             qs = qs.filter(course_id=course_id)
-        page = int(request.GET.get('page', 1))
-        size = int(request.GET.get('pageSize', 20))
+        page, size = parse_paging(request)
         total = qs.count()
         files = qs[(page - 1) * size: page * size]
         return make_response(data={
@@ -45,19 +58,17 @@ def file_list(request):
 
 @api_view(['GET', 'DELETE'])
 def file_detail(request, pk):
-    if request.method == 'GET':
-        try:
-            uf = UploadedFile.objects.get(pk=pk)
-        except UploadedFile.DoesNotExist:
-            return make_response(code=404, message='文件不存在', http_status=404)
-        return make_response(data=UploadedFileSerializer(uf).data)
-    # Admin or owner can delete
     try:
-        uf = UploadedFile.objects.get(pk=pk)
+        uf = UploadedFile.objects.select_related('course').get(pk=pk)
     except UploadedFile.DoesNotExist:
         return make_response(code=404, message='文件不存在', http_status=404)
-    if request.user.role != User.Role.ADMIN and uf.uploader != request.user:
-        return make_response(code=403, message='无权限', http_status=403)
+    # 归属校验：admin / 上传者 / 该课程的授课教师
+    if not _can_access_file(request.user, uf):
+        return make_response(code=403, message='无权访问该文件', http_status=403)
+
+    if request.method == 'GET':
+        return make_response(data=UploadedFileSerializer(uf).data)
+
     if os.path.exists(uf.stored_path):
         os.remove(uf.stored_path)
     uf.delete()

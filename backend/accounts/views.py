@@ -1,5 +1,7 @@
-﻿import random
+import logging
+import secrets
 import string
+
 from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -8,10 +10,14 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from django.db import models, IntegrityError
 from .models import User
+from services.pagination import parse_paging
+from services.search import search_filter
 from .serializers import (
     UserSerializer, LoginSerializer, RegisterSerializer,
     ChangePasswordSerializer, ForgotPasswordSerializer, UserUpdateSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def make_response(data=None, code=200, message="success", http_status=200):
@@ -24,9 +30,13 @@ def get_tokens_for_user(user):
 
 
 def _generate_temp_password(length: int = 10) -> str:
-    """Generate a random temporary password."""
+    """生成随机临时密码。
+
+    必须用 secrets 而不是 random：random 是可预测的 Mersenne Twister，
+    拿它生成凭等于给攻击者留后门。这里的密码直接决定账号能否被接管。
+    """
     chars = string.ascii_letters + string.digits
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 
 # ── Auth ─────────────────────────────────────────────
@@ -63,7 +73,9 @@ def register(request):
     user = User.objects.create_user(
         username=d["username"], password=d["password"],
         email=d.get("email", ""),
-        role=d.get("role", User.Role.STUDENT),
+        # 安全：自助注册一律为学生，角色由服务端决定，绝不采用客户端提交的值。
+        # 否则任何人都能以 role=admin 注册，而登录只拦截「学生未审核」，等于自助提权。
+        role=User.Role.STUDENT,
         student_id=d.get("student_id", ""),
         sex=d.get("sex", ""),
         dept=d.get("dept", ""),
@@ -84,15 +96,38 @@ def get_user_info(request):
     return make_response(data=UserSerializer(request.user).data)
 
 @api_view(["POST"])
+@permission_classes([permissions.AllowAny])
 def refresh_token(request):
+    """刷新 access token。
+
+    必须 AllowAny：access 过期后前端手里只剩 refresh，此时请求没有有效凭证，
+    会被全局 IsAuthenticated 直接挡在视图之外 —— 旧实现没加，导致「过期就
+    再也刷不了」只能重新登录。
+
+    同时落实「双 Token 轮换 + 旧 refresh 即时失效」：每次刷新都签发新的
+    refresh，并把旧的拉黑。此前 refresh 原样返回、旧 token 永久有效，
+    配置里的 BLACKLIST_AFTER_ROTATION 对这个手写视图完全不生效。
+    """
     refresh = request.data.get("refreshToken", "")
     if not refresh:
         return make_response(code=400, message="缺少 refreshToken", http_status=400)
     try:
         token = RefreshToken(refresh)
-        return make_response(data={"accessToken": str(token.access_token), "refreshToken": str(token)})
+        user = User.objects.get(pk=token["user_id"], is_active=True)
     except Exception:
         return make_response(code=401, message="Token 无效或已过期", http_status=401)
+
+    new_refresh = RefreshToken.for_user(user)
+    # 旧 refresh 立即作废；失败不影响本次刷新，但要留痕便于排查
+    try:
+        token.blacklist()
+    except Exception:
+        logger.warning("refresh token 拉黑失败（token_blacklist 未就绪）", exc_info=True)
+
+    return make_response(data={
+        "accessToken": str(new_refresh.access_token),
+        "refreshToken": str(new_refresh),
+    })
 
 @api_view(["POST"])
 def change_password(request):
@@ -106,27 +141,63 @@ def change_password(request):
     user.save()
     return make_response(message="密码修改成功")
 
+def _send_reset_email(to_email: str, username: str, temp_password: str) -> bool:
+    """尝试把临时密码发给用户。返回是否真的送达。
+
+    邮件服务未配置 / 发送失败都返回 False —— 调用方据此决定**是否真的改密**。
+    """
+    from django.conf import settings
+    from django.core.mail import send_mail, BadHeaderError
+
+    if not getattr(settings, "EMAIL_HOST", None) and not getattr(settings, "EMAIL_BACKEND", None):
+        return False
+    try:
+        send_mail(
+            subject="【Teek 教学助手】密码重置",
+            message=f"您好 {username}：\n\n您的临时密码为：{temp_password}\n\n请尽快登录并修改密码。",
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            recipient_list=[to_email],
+            fail_silently=False,
+        )
+        return True
+    except (BadHeaderError, OSError, Exception):  # noqa: BLE001 - 任何发送失败都不能改密
+        logger.warning("忘记密码邮件发送失败，未重置密码", exc_info=True)
+        return False
+
+
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def forgot_password(request):
+    """忘记密码：**只有确认临时密码能送达时才覆盖原密码**。
+
+    旧实现无条件 set_password 后才发现邮件是 TODO —— 攻击者可以对任意邮箱
+    反复调用，每次都把密码改成一个没人知道的随机串，账号被永久锁死。
+    这里改成「先送达、后生效」，同时对不存在的邮箱保持同样的返回，
+    不暴露邮箱是否已注册。
+    """
     ser = ForgotPasswordSerializer(data=request.data)
     if not ser.is_valid():
         return make_response(code=400, message=str(ser.errors), http_status=400)
     email = ser.validated_data["email"]
+    generic_message = "如果该邮箱已注册，临时密码已发送，请查收"
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
         # 不暴露该邮箱是否已注册
-        return make_response(message="如果该邮箱已注册，临时密码已发送，请查收")
+        return make_response(message=generic_message)
+
     temp_password = _generate_temp_password()
+    if not _send_reset_email(email, user.username, temp_password):
+        # 关键：不改密码。宁可让用户去找管理员，也不能把人锁在门外。
+        logger.warning(
+            "[forgot_password] 邮件未送达，已跳过密码重置（user=%s）", user.username
+        )
+        return make_response(message=generic_message)
+
     user.set_password(temp_password)
-    user.save()
-    # TODO: 接入邮件服务发送临时密码邮件
-    # send_mail("密码重置", f"您的临时密码为：{temp_password}，请登录后尽快修改密码。", settings.DEFAULT_FROM_EMAIL, [email])
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"[forgot_password] 用户 {user.username} 临时密码已生成 (未发送邮件，需配置 EMAIL_BACKEND)")
-    return make_response(message="如果该邮箱已注册，临时密码已发送，请查收")
+    user.save(update_fields=["password"])
+    logger.info("[forgot_password] 用户 %s 临时密码已发送并生效", user.username)
+    return make_response(message=generic_message)
 
 @api_view(["GET", "PUT"])
 def profile(request):
@@ -172,11 +243,10 @@ def registration_list(request):
         qs = qs.filter(is_approved=False)
     elif status_filter == "approved":
         qs = qs.filter(is_approved=True)
-    page = max(1, int(request.GET.get("page", 1)))
-    size = max(1, min(100, int(request.GET.get("pageSize", 20))))
+    page, size = parse_paging(request)
     search = request.GET.get("search", "")
     if search:
-        qs = qs.filter(models.Q(username__icontains=search) | models.Q(student_id__icontains=search) | models.Q(dept__icontains=search))
+        qs = search_filter(qs, search, "user")
     total = qs.count()
     users = qs.order_by("-date_joined")[(page - 1) * size : page * size]
     return make_response(data={
@@ -203,13 +273,18 @@ def approve_registration(request, pk):
 
 @api_view(["POST"])
 def reject_registration(request, pk):
-    """Admin: reject/delete a registration."""
+    """Admin: 拒绝一条**待审核**的注册申请。
+
+    只允许处理 is_approved=False 的记录：已通过审核的用户是真实账号，
+    走这里被物理删除会连带丢掉他的课程、对话、学习记录。
+    旧实现只校验 role=student，等于给管理员留了一个误删在用账号的入口。
+    """
     if request.user.role != User.Role.ADMIN:
         return make_response(code=403, message="无权限", http_status=403)
     try:
-        user = User.objects.get(pk=pk, role=User.Role.STUDENT)
+        user = User.objects.get(pk=pk, role=User.Role.STUDENT, is_approved=False)
     except User.DoesNotExist:
-        return make_response(code=404, message="用户不存在", http_status=404)
+        return make_response(code=404, message="待审核用户不存在", http_status=404)
     user.delete()
     return make_response(message="已拒绝并删除")
 
@@ -230,12 +305,23 @@ def batch_approve(request):
 
 @api_view(["POST"])
 def import_excel(request):
-    """Admin: batch import students from CSV or xlsx."""
+    """Admin: 从 CSV / xlsx 批量导入学生。
+
+    与自助注册保持同一套审核语义：默认**进入待审核**（is_approved=False），
+    走既有的批量审核接口通过。需要直接开通时显式传 approved=true，
+    不再静默绕过审核。
+
+    同时把新账号的初始密码返回给管理员 —— 旧实现随机生成密码却谁也不告诉，
+    导入进来的学生实际上无法登录。
+    """
     if request.user.role != User.Role.ADMIN:
         return make_response(code=403, message="无权限", http_status=403)
     file = request.FILES.get("file")
     if not file:
         return make_response(code=400, message="请上传文件", http_status=400)
+
+    raw_approved = request.data.get("approved", False)
+    approved = str(raw_approved).lower() in ("1", "true", "yes", "on") if not isinstance(raw_approved, bool) else raw_approved
 
     try:
         import openpyxl
@@ -265,6 +351,7 @@ def import_excel(request):
     created = 0
     skipped = 0
     errors = []
+    credentials = []
     for i, row in enumerate(rows):
         try:
             student_id_raw = str(row[0] if row[0] is not None else "").strip()
@@ -290,9 +377,10 @@ def import_excel(request):
                 username=username, password=password,
                 student_id=student_id_raw, sex=sex, dept=dept,
                 major="", grade=grade,
-                role=User.Role.STUDENT, is_approved=True
+                role=User.Role.STUDENT, is_approved=approved,
             )
             created += 1
+            credentials.append({"username": username, "password": password})
         except Exception as e:
             errors.append(f"第{i+2}行: {str(e)}")
             skipped += 1
@@ -300,6 +388,10 @@ def import_excel(request):
     return make_response(data={
         "created": created, "skipped": skipped, "errors": errors[:10],
         "total_rows": len(rows),
+        "approved": approved,
+        "pending_review": 0 if approved else created,
+        # 初始密码只在本次响应里出现，管理员需自行分发并要求学生尽快改密
+        "credentials": credentials,
     })
 
 
@@ -315,11 +407,10 @@ def user_list(request):
         qs = User.objects.annotate(
             course_count=Count("enrollments", filter=Q(enrollments__status="approved"))
         ).order_by("-date_joined")
-        page = max(1, int(request.GET.get("page", 1)))
-        size = max(1, min(100, int(request.GET.get("pageSize", 20))))
+        page, size = parse_paging(request)
         search = request.GET.get("search", "")
         if search:
-            qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search) | Q(student_id__icontains=search))
+            qs = search_filter(qs, search, "user")
         role = request.GET.get("role", "")
         if role:
             qs = qs.filter(role=role)
@@ -378,31 +469,6 @@ def user_detail(request, pk):
             return make_response(code=400, message="不能删除自己", http_status=400)
         user.delete()
         return make_response(message="删除成功")
-
-@api_view(["GET"])
-def message_list(request):
-    return make_response(data={"unread": [], "read": [], "recycle": [], "total": 0, "unreadCount": 0})
-
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
-def get_menu_list(request):
-    role = request.user.role
-    all_menus = [
-        {"menuCode": "home", "menuName": "首页", "menuUrl": "/home", "pagePath": "/home", "parentMenuCode": "", "seq": 1, "imageIcon": ""},
-        {"menuCode": "workbenches", "menuName": "工作台", "menuUrl": "/workbenches", "pagePath": "/workbenches", "parentMenuCode": "", "seq": 2, "imageIcon": ""},
-        {"menuCode": "course-management", "menuName": "课程管理", "menuUrl": "", "pagePath": "", "parentMenuCode": "", "seq": 3, "imageIcon": ""},
-    ]
-    if role == "student":
-        all_menus += [
-            {"menuCode": "my-courses", "menuName": "我的课程", "menuUrl": "/course/dashboard", "pagePath": "/course/dashboard", "parentMenuCode": "course-management", "seq": 1, "imageIcon": ""},
-            {"menuCode": "course-enroll", "menuName": "选课中心", "menuUrl": "/course/enroll", "pagePath": "/course/enroll", "parentMenuCode": "course-management", "seq": 2, "imageIcon": ""},
-        ]
-    if role in ("admin", "teacher"):
-        all_menus += [
-            {"menuCode": "admin-center", "menuName": "管理中心", "menuUrl": "/admin/dashboard", "pagePath": "/admin/dashboard", "parentMenuCode": "", "seq": 99, "imageIcon": ""},
-        ]
-    return make_response(data=all_menus)
-
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])

@@ -5,19 +5,17 @@ import { serviceConfig } from "@/common/config";
 import { SwitchDark } from "@/components";
 import { useNamespace } from "@/composables";
 import LoginForm from "./loginForm.vue";
-import Phone from "./components/phone.vue";
-import QrCode from "./components/qrCode.vue";
 import Register from "./components/register.vue";
-import Forget from "./components/forget.vue";
 
 const ns = useNamespace("login");
 
+// 登录方式只保留「账号密码」与「注册」。
+// 原先还有 phone（手机登录，后端无此接口）、forget（忘记密码，前端收手机号而后端
+// 要 email，永远打不通）、qrCode（模拟登录，无任何切换入口）三种，均为接不上
+// 后端的模板演示，已删除，免得用户以为存在实际能力。
 const formComponents: Record<string, Component> = {
   login: LoginForm,
-  phone: Phone,
-  qrCode: QrCode,
   register: Register,
-  forget: Forget,
 };
 
 const formMode = ref("login");

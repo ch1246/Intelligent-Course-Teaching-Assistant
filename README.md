@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="UI/public/logo2.png" alt="Teek" width="96" />
 </p>
 
@@ -6,7 +6,7 @@
 <p align="center"><strong>Teek Teaching Assistant</strong> — 基于 RAG 的 AI 教学辅助平台</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/backend-Django%205-092E20?logo=django" alt="Django" />
+  <img src="https://img.shields.io/badge/backend-Django%206.0.7-092E20?logo=django" alt="Django" />
   <img src="https://img.shields.io/badge/framework-DRF-ff1709?logo=django" alt="DRF" />
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql" alt="MySQL" />
   <img src="https://img.shields.io/badge/vector--db-ChromaDB-FF7F50" alt="ChromaDB" />
@@ -22,7 +22,7 @@
 
 **Teek 教学助手**是一款面向高校课程的 AI 教学辅助平台。通过 **RAG（检索增强生成）** 技术，将教师上传的课件、教材、实验指导等课程资料向量化存储，学生在对话时自动检索相关内容，结合 LLM 生成精准、有据可查的回答。
 
-平台集成了 **提示词工程**、**上下文工程** 和 **编排评估（Harness）** 三大核心能力，不仅提供智能问答，还可以通过可视化界面管理提示词模板、调优检索策略、评估管道效果。
+平台集成了 **提示词工程**、**上下文工程** 和 **编排评估（Harness）** 三大核心能力，不仅提供智能问答，还可以通过可视化界面管理提示词模板、调优检索策略、编排管道并追踪链路。
 
 ### 核心功能
 
@@ -32,8 +32,8 @@
 | 📚 **向量知识库** | 支持 PDF/Word/PPT/Markdown 上传，自动分块、嵌入、索引 |
 | ✏️ **提示词工程** | Jinja2 模板编辑、变量插值、版本历史、在线预览、一键回滚 |
 | 🎛️ **上下文工程** | 检索 Top-K、相似度阈值、分块参数、Token 预算、重排开关可配置 |
-| 📊 **编排评估** | 管道串联（模板+策略+模型），评估数据集管理，链路追踪 |
-| 🔐 **安全认证** | JWT 双 Token、黑名单机制、API Key Fernet 加密 |
+| 📊 **编排评估** | 管道编排 + 链路追踪 |
+| 🔐 **安全认证** | JWT 双 Token + 刷新轮换与黑名单、API Key Fernet 加密 |
 | 🌓 **主题切换** | Element Plus 暗黑/明亮模式，CSS 变量统一管理 |
 | 🌍 **国际化** | 中英文切换，i18n key 规范化 |
 
@@ -49,7 +49,7 @@
                                │ HTTP / SSE
                                ▼
                    ┌─────────────────────────┐
-                   │   Django 5 + DRF        │
+                   │   Django 6 + DRF        │
                    │    REST API (backend/)   │
                    └─────┬──────┬──────┬─────┘
                          │      │      │
@@ -239,6 +239,9 @@ pnpm dev
 | 向量知识库 | `/api/admin/vector-db/collections` | 集合管理 + 文档上传 + 重建索引 |
 | Agent API | `/api/admin/agent-api-configs` | LLM 配置管理 |
 | **提示词模板** | `/api/admin/prompts` | CRUD + 预览 + 版本历史 + 回滚 |
+| **上下文策略** | `/api/admin/context-strategies` | CRUD + 设为默认 |
+| **管道编排** | `/api/admin/pipelines` | CRUD + 绑定模板/策略/模型 |
+| **链路追踪** | `/api/admin/traces` | 检索/组装/生成/记忆四阶段耗时 |
 
 ### 课程中心
 
@@ -258,11 +261,10 @@ pnpm dev
 | 特性 | 实现方式 |
 |------|----------|
 | **密码哈希** | Django `AbstractUser` — PBKDF2 + SHA256 |
-| **API Key 加密** | `cryptography.fernet` 对称加密，密钥由 SECRET_KEY 派生 |
-| **JWT 双 Token** | access 2h + refresh 7d，`BLACKLIST_AFTER_ROTATION = True` |
-| **Token 黑名单** | 刷新后旧 refresh token 即时失效，防止盗用 |
-| **CORS 白名单** | `rest_framework_simplejwt.token_blacklist` |
-| **忘记密码** | 邮箱查用户 + 随机临时密码重置 |
+| **API Key 加密** | `cryptography.fernet` 对称加密，密钥由 `API_KEY_ENCRYPTION_KEY` 提供（未配置时由 SECRET_KEY 派生） |
+| **JWT 双 Token** | access 2h / refresh 7d；每次刷新都轮换 refresh 并把旧 token 拉黑（`token_blacklist`），access 过期后仍可用 refresh 续期 |
+| **CORS 白名单** | `django-cors-headers` + `CORS_ALLOWED_ORIGINS` |
+| **忘记密码** | 邮箱查用户 + 随机临时密码；**确认邮件送达后才覆盖原密码**，避免账号被反复锁死 |
 | **Excel 导入** | 随机 10 位初始密码（非学号后 6 位） |
 | **配置安全** | 全部通过 `.env` 注入，无敏感信息硬编码 |
 
@@ -275,6 +277,7 @@ pnpm dev
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `DJANGO_SECRET_KEY` | (fallback) | Django 密钥 |
+| `API_KEY_ENCRYPTION_KEY` | (由 SECRET_KEY 派生) | API Key 的 Fernet 密钥（32 字节 urlsafe-base64），未配置则回退派生 |
 | `DJANGO_DEBUG` | `True` | 调试开关 |
 | `DJANGO_ALLOWED_HOSTS` | `*` | 允许主机 |
 | `DB_NAME` | `teek_teaching_assistant` | 数据库名 |

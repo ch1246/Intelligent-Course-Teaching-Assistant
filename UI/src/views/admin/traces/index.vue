@@ -93,7 +93,13 @@ onMounted(fetchList);
         <div class="card-header">
           <span>{{ t("_route.AdminTraces") }}</span>
           <div class="header-actions">
-            <el-select v-model="phaseFilter" clearable :placeholder="t('_trace.filterPhase')" style="width: 140px" @change="fetchList">
+            <el-select
+              v-model="phaseFilter"
+              clearable
+              :placeholder="t('_trace.filterPhase')"
+              style="width: 140px"
+              @change="fetchList"
+            >
               <el-option v-for="opt in phaseOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
             </el-select>
             <el-button :icon="Refresh" @click="fetchList" />
@@ -115,14 +121,21 @@ onMounted(fetchList);
         </el-table-column>
         <el-table-column :label="t('_trace.duration')" width="120" align="right">
           <template #default="{ row }">
-            <span :style="{ color: row.duration_ms > 1000 ? '#f59e0b' : 'inherit', fontWeight: row.duration_ms > 1000 ? 600 : 400 }">
+            <span
+              :style="{
+                color: row.duration_ms > 1000 ? '#f59e0b' : 'inherit',
+                fontWeight: row.duration_ms > 1000 ? 600 : 400,
+              }"
+            >
               {{ formatDuration(row.duration_ms) }}
             </span>
           </template>
         </el-table-column>
         <el-table-column :label="t('_trace.detailPreview')" min-width="300">
           <template #default="{ row }">
-            <code class="detail-preview">{{ JSON.stringify(row.detail).slice(0, 120) }}{{ JSON.stringify(row.detail).length > 120 ? "..." : "" }}</code>
+            <code class="detail-preview">
+              {{ JSON.stringify(row.detail).slice(0, 120) }}{{ JSON.stringify(row.detail).length > 120 ? "..." : "" }}
+            </code>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" :label="t('_common.time')" width="170" />
@@ -146,7 +159,11 @@ onMounted(fetchList);
     </el-card>
 
     <!-- Detail Dialog -->
-    <el-dialog v-model="detailVisible" :title="`${t('_trace.traceDetail')} - ${phaseLabel(currentPhase)}`" width="700px">
+    <el-dialog
+      v-model="detailVisible"
+      :title="`${t('_trace.traceDetail')} - ${phaseLabel(currentPhase)}`"
+      width="700px"
+    >
       <div class="detail-content">
         <div v-for="(value, key) in currentDetail" :key="key" class="detail-row">
           <span class="detail-key">{{ key }}</span>

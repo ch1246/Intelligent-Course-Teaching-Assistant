@@ -1,4 +1,4 @@
-﻿from django.contrib import admin
+from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
@@ -28,8 +28,6 @@ urlpatterns = [
     path("api/files/", include("files_app.urls")),
     # Settings
     path("api/settings/", include("settings_app.urls")),
-    # Menu
-    path("api/", include("accounts.urls_menu")),
 ]
 
 if settings.DEBUG:

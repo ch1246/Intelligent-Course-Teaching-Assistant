@@ -1,5 +1,6 @@
-﻿from django.utils import timezone
+from django.utils import timezone
 from django.db.models import Count, Sum
+from django.db.models.functions import TruncDate
 from datetime import timedelta
 from rest_framework.decorators import api_view
 from accounts.views import make_response
@@ -11,6 +12,28 @@ from files_app.models import UploadedFile
 from .models import LearningRecord
 
 
+def _require_course_access(request, course):
+    """课程数据访问控制。返回 None 表示放行，否则返回错误响应。
+
+    - admin：全部课程
+    - teacher：仅自己任教的课程
+    - student：必须已选修（status=approved）
+
+    旧实现完全不校验归属，任何登录用户都能翻出任意课程的看板、对话统计与
+    学习总结 —— 这些数据里含学生的提问与学习记录。
+    """
+    user = request.user
+    if user.role == User.Role.ADMIN:
+        return None
+    if user.role == User.Role.TEACHER:
+        if course.teacher_id == user.id:
+            return None
+        return make_response(code=403, message='无权查看该课程数据', http_status=403)
+    if Enrollment.objects.filter(student=user, course=course, status='approved').exists():
+        return None
+    return make_response(code=403, message='未选修该课程', http_status=403)
+
+
 # ── Admin: global dashboard ───────────────────────────
 
 @api_view(['GET'])
@@ -18,6 +41,8 @@ def admin_dashboard(request):
     if request.user.role not in (User.Role.ADMIN, User.Role.TEACHER):
         return make_response(code=403, message='无权限', http_status=403)
     today = timezone.now().date()
+    first_course = Course.objects.order_by('created_at').values('created_at').first()
+    started = (first_course['created_at'] if first_course else None)
     return make_response(data={
         'user_count': User.objects.count(),
         'teacher_count': User.objects.filter(role=User.Role.TEACHER).count(),
@@ -25,10 +50,11 @@ def admin_dashboard(request):
         'course_count': Course.objects.count(),
         'active_course_count': Course.objects.filter(is_active=True).count(),
         'file_count': UploadedFile.objects.count(),
-        'today_chats': ChatMessage.objects.filter(created_at__date=today).count(),
+        # 「今日提问」只统计学生提问，不含 AI 回复 —— 旧实现把回答也算进去，数字虚高一倍
+        'today_chats': ChatMessage.objects.filter(created_at__date=today, role=ChatMessage.Role.USER).count(),
         'total_messages': ChatMessage.objects.count(),
         'pending_enrollments': Enrollment.objects.filter(status='pending').count(),
-        'system_days': (today - (Course.objects.order_by('created_at').first().created_at or today).date()).days if Course.objects.exists() and Course.objects.order_by('created_at').first() and Course.objects.order_by('created_at').first().created_at else 0,
+        'system_days': max(0, (today - started.date()).days) if started else 0,
     })
 
 
@@ -61,6 +87,9 @@ def dashboard(request, course_id):
         course = Course.objects.get(pk=course_id)
     except Course.DoesNotExist:
         return make_response(code=404, message='课程不存在', http_status=404)
+    denied = _require_course_access(request, course)
+    if denied is not None:
+        return denied
 
     student_count = Enrollment.objects.filter(course=course, status='approved').count()
     session_count = ChatSession.objects.filter(course=course).count()
@@ -116,6 +145,13 @@ def dashboard(request, course_id):
 @api_view(['GET'])
 def chat_stats(request, course_id):
     """Chat statistics for a course."""
+    try:
+        course = Course.objects.get(pk=course_id)
+    except Course.DoesNotExist:
+        return make_response(code=404, message='课程不存在', http_status=404)
+    denied = _require_course_access(request, course)
+    if denied is not None:
+        return denied
     sessions = ChatSession.objects.filter(course_id=course_id)
     total_sessions = sessions.count()
     total_messages = ChatMessage.objects.filter(session__course_id=course_id).count()
@@ -132,15 +168,19 @@ def chat_stats(request, course_id):
     # Last 7 days (single query with GROUP BY)
     today = timezone.now().date()
     seven_days_ago = today - timedelta(days=6)
-    day_counts = dict(
-        ChatMessage.objects.filter(
-            session__course_id=course_id, created_at__date__gte=seven_days_ago
+    # 用 TruncDate + 半开区间：Django 6 已弃用 .extra()，且 DATE(created_at) 是
+    # 函数条件会让索引失效。改成 created_at >= / < 让 B+ 树索引能用上。
+    day_counts = {
+        row['day'].date() if hasattr(row['day'], 'date') else row['day']: row['c']
+        for row in ChatMessage.objects.filter(
+            session__course_id=course_id,
+            created_at__gte=seven_days_ago,
+            created_at__lt=today + timedelta(days=1),
         )
-        .extra(select={'day': 'DATE(created_at)'})
-        .values_list('day')
+        .annotate(day=TruncDate('created_at'))
+        .values('day')
         .annotate(c=Count('id'))
-        .values_list('day', 'c')
-    )
+    }
     days = []
     for i in range(6, -1, -1):
         d = today - timedelta(days=i)
@@ -162,17 +202,28 @@ def chat_stats(request, course_id):
 @api_view(['GET'])
 def learning_time(request, course_id):
     """Get learning time for a course. Time is recorded automatically from real chat turns."""
+    try:
+        course = Course.objects.get(pk=course_id)
+    except Course.DoesNotExist:
+        return make_response(code=404, message='课程不存在', http_status=404)
+    denied = _require_course_access(request, course)
+    if denied is not None:
+        return denied
     records = LearningRecord.objects.filter(
         user=request.user, course_id=course_id
     ).order_by('-date')[:30]
-    total = round(sum(r.duration_seconds for r in records) / 60, 1)
+    # 总时长必须覆盖全部记录。旧实现只对最近 30 条求和，与仪表盘的全量口径
+    # 不一致 —— 同一个数两个页面对不上。
+    total_seconds = LearningRecord.objects.filter(
+        user=request.user, course_id=course_id
+    ).aggregate(total=Sum('duration_seconds'))['total'] or 0
     return make_response(data={
         'records': [
             {'date': str(r.date), 'duration_minutes': round(r.duration_seconds / 60, 1),
              'duration_seconds': r.duration_seconds}
             for r in records
         ],
-        'total_minutes': total,
+        'total_minutes': round(total_seconds / 60, 1),
     })
 
 
@@ -183,6 +234,9 @@ def course_summary(request, course_id):
         course_obj = Course.objects.get(pk=course_id)
     except Course.DoesNotExist:
         return make_response(code=404, message='课程不存在', http_status=404)
+    denied = _require_course_access(request, course_obj)
+    if denied is not None:
+        return denied
 
     total_time = round(
         sum(r.duration_seconds for r in LearningRecord.objects.filter(user=request.user, course=course_obj)) / 60

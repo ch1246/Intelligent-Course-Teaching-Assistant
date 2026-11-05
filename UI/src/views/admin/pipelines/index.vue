@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Edit, Delete, Check, Connection } from "@element-plus/icons-vue";
+import { Plus, Edit, Delete, Check } from "@element-plus/icons-vue";
 import { t } from "@/common/languages";
 import { http } from "@/common/http";
 
@@ -24,7 +24,10 @@ interface Pipeline {
   updated_at: string;
 }
 
-interface Option { id: number; name: string }
+interface Option {
+  id: number;
+  name: string;
+}
 
 const list = ref<Pipeline[]>([]);
 const loading = ref(false);
@@ -128,11 +131,9 @@ async function handleSave() {
 
 async function handleDelete(row: Pipeline) {
   try {
-    await ElMessageBox.confirm(
-      t("_common.confirmDelete", { name: row.name }),
-      t("_common.confirm"),
-      { type: "warning" }
-    );
+    await ElMessageBox.confirm(t("_common.confirmDelete", { name: row.name }), t("_common.confirm"), {
+      type: "warning",
+    });
     await http.delete(`/admin/pipelines/${row.id}`);
     ElMessage.success(t("_common.deleteSuccess"));
     fetchList();
@@ -237,7 +238,11 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item :label="t('_common.status')">
-          <el-switch v-model="form.is_active" :active-text="t('_common.active')" :inactive-text="t('_common.inactive')" />
+          <el-switch
+            v-model="form.is_active"
+            :active-text="t('_common.active')"
+            :inactive-text="t('_common.inactive')"
+          />
           <el-switch v-model="form.is_default" :active-text="t('_common.setDefault')" style="margin-left: 20px" />
         </el-form-item>
       </el-form>

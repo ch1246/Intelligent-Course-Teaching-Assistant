@@ -1,9 +1,11 @@
-﻿import json
+import json
 import logging
 import asyncio
 import threading
 import re
 import time as _time
+from datetime import timedelta
+
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework.decorators import api_view
@@ -16,8 +18,27 @@ from .serializers import (
 from accounts.views import make_response
 from courses.models import Course
 from settings_app.models import AgentAPIConfig
-from services.rag_service import chat_stream_structured, search_similar
+from services.rag_service import (
+    chat_stream_structured,
+    collection_name_for_course,
+    distance_to_similarity,
+    expand_queries,
+    lexical_rerank,
+    search_similar,
+)
 from services.context_compressor import compress_messages
+from services.rag_chain import render_system_prompt
+
+# LangChain 主链路：依赖缺失时置 None，调用处降级为手写实现
+# （search_similar / chat_stream_structured），保证应用仍可启动。
+try:
+    from services.langchain_vectorstore import search_with_scores
+except Exception:  # pragma: no cover - langchain 依赖缺失时降级
+    search_with_scores = None
+try:
+    from services.langchain_llm import get_llm_with_params
+except Exception:  # pragma: no cover - langchain 依赖缺失时降级
+    get_llm_with_params = None
 from harness.models import TraceLog
 from dashboard.models import LearningRecord
 
@@ -133,21 +154,49 @@ def _build_memory_prompt(memories: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ── 学生画像掌握度更新规则 ─────────────────────────────
+# 可观测的证据只有两条：同一知识点的**重复提问**，以及**两次提问的间隔**。
+#   · 短时间内反复问同一个点 → 说明上次没讲懂，是负向证据 → 衰减
+#   · 隔了较久再问同一个点 → 更接近「复习/回忆」，是正向证据 → 小幅提升
+# 旧实现只有衰减项，掌握度会单调漂到下限 0.1，画像长期失真。
+REASK_DECAY_WINDOW = timedelta(hours=24)  # 24 小时内重复提问视为「还没懂」
+MASTERY_REASK_DECAY = 0.88                # 相对衰减 12%
+MASTERY_FLOOR = 0.1
+MASTERY_CEIL = 0.95
+MASTERY_REVIEW_BOOST = 0.06               # 每次间隔式复习吃掉剩余差距的 6%
+
+
 def _update_memory(user, course, question: str, response: str):
-    """Update user memory after each Q&A turn."""
+    """Update user memory after each Q&A turn.
+
+    规则见上方常量说明。回答为空（生成失败/中断）时不做任何调整 —— 没学到
+    不等于没掌握；掌握度的主动修正走 memory_bulk_update API（教师/前端手动）。
+    """
+    if not (response or "").strip():
+        return
     topics = _extract_topics(question)
     if not topics:
         return
 
+    now = timezone.now()
     for topic in topics:
         obj, created = UserMemory.objects.get_or_create(
             user=user, course=course, topic=topic,
             defaults={"mastery": 0.5, "question_count": 1},
         )
-        if not created:
-            obj.question_count += 1
-            obj.mastery = max(0.1, obj.mastery - 0.12 * obj.mastery)
-        obj.last_asked_at = timezone.now()
+        if created:
+            continue
+
+        obj.question_count += 1
+        gap = now - obj.last_asked_at if obj.last_asked_at else REASK_DECAY_WINDOW
+        if gap < REASK_DECAY_WINDOW:
+            # 还没懂：相对衰减，且有下限，不会归零
+            obj.mastery = max(MASTERY_FLOOR, obj.mastery * MASTERY_REASK_DECAY)
+        else:
+            # 间隔式复习：向 1 收敛但永远够不到，避免刷成 100%
+            obj.mastery = min(MASTERY_CEIL, obj.mastery + MASTERY_REVIEW_BOOST * (1 - obj.mastery))
+
+        obj.last_asked_at = now
         obj.save(update_fields=["question_count", "mastery", "last_asked_at"])
 
 
@@ -224,85 +273,19 @@ def _get_agent_config():
     return config
 
 
-def _build_system_prompt_legacy(skill: str, course_name: str, context_docs: list[dict], memory_prompt: str = "") -> str:
-    """Legacy fallback — hardcoded prompts for each skill."""
-    skills_prompt = {
-        "qa": f"""你是"{course_name}"课程的AI教学助手。请根据提供的课程资料回答学生问题。
-
-要求：
-- 优先使用【参考资料】中的内容回答
-- 如果资料中没有相关信息，请如实告知
-- 回答要有条理，使用标题和列表组织内容
-- 对关键概念给出清晰的定义和解释
-- 如有公式，用 LaTeX $$...$$ 格式呈现
-- 结尾可追问学生是否还有疑问""",
-        "formula": f"""你是"{course_name}"课程的公式推导助手。
-
-要求：
-- 逐步推导相关公式，每个步骤都要解释
-- 使用 LaTeX $$...$$ 格式呈现公式
-- 说明每个步骤的物理/数学意义""",
-        "code_debug": f"""你是"{course_name}"课程的代码调试助手。
-
-要求：
-- 先分析代码的逻辑和潜在问题
-- 给出修正后的代码（用 ``` 代码块包裹）
-- 解释修改的原因""",
-        "lab_guide": f"""你是"{course_name}"课程的实验指导助手。
-
-要求：
-- 给出清晰的实验步骤（1. 2. 3.）
-- 标注每个步骤的注意事项
-- 说明预期结果和可能的错误""",
-        "paper_reader": f"""你是"{course_name}"课程的论文阅读助手。
-
-要求：
-- 提炼论文的核心贡献和创新点
-- 解释关键技术方法
-- 分析实验设计和结果""",
-    }
-    prompt = skills_prompt.get(skill, skills_prompt["qa"])
-    if context_docs:
-        docs_text = "\n\n---\n\n".join([
-            f"""[来源: {d.get("metadata", {}).get("source", "未知")}]\n{d["content"]}"""
-            for d in context_docs
-        ])
-        prompt += f"\n\n【参考资料】\n{docs_text}"
-    if memory_prompt:
-        prompt += memory_prompt
-    return prompt
-
-
-def _build_system_prompt_from_template(
-    template_content: str, course_name: str, context_docs: list[dict],
-    memory_prompt: str = "", user_question: str = ""
-) -> str:
-    """Render a Jinja2 prompt template with context variables."""
-    docs_text = ""
-    if context_docs:
-        docs_text = "\n\n---\n\n".join([
-            f"""[来源: {d.get("metadata", {}).get("source", "未知")}]\n{d["content"]}"""
-            for d in context_docs
-        ])
-    try:
-        from jinja2 import Template
-        rendered = Template(template_content).render(
-            course_name=course_name,
-            retrieval_docs=docs_text,
-            memory_prompt=memory_prompt,
-            user_question=user_question,
-        )
-        return rendered
-    except Exception:
-        # Jinja2 渲染失败 → 退回 legacy
-        return template_content.replace("{{ course_name }}", course_name) \
-                               .replace("{{ retrieval_docs }}", docs_text) \
-                               .replace("{{ memory_prompt }}", memory_prompt) \
-                               .replace("{{ user_question }}", user_question)
+# 系统提示词装配已迁至 services.rag_chain（render_system_prompt /
+# build_system_prompt_legacy / build_system_prompt_from_template），
+# 生产链路与 LCEL 链共用同一套提示词，改提示词只改 rag_chain.py。
 
 
 def _resolve_pipeline(skill: str):
-    """Resolve RAG pipeline from DB config. Returns (prompt_template, context_strategy, agent_config)."""
+    """Resolve RAG pipeline from DB config.
+
+    Returns ``(prompt_template, context_strategy, agent_config, pipeline)``。
+    第 4 项是真正命中的 RAGPipeline（走默认管道时有值，走回退时为 None），
+    用于把 TraceLog 记录关联到管道 —— 此前 4 处 TraceLog 写入都没传 pipeline，
+    链路追踪里这个外键恒为 NULL，页面上永远看不到是哪条管道跑的。
+    """
     # 1. Try default pipeline
     from harness.models import RAGPipeline
     pipeline = RAGPipeline.objects.filter(
@@ -311,7 +294,7 @@ def _resolve_pipeline(skill: str):
     ).select_related("prompt_template", "context_strategy", "agent_config").first()
 
     if pipeline:
-        return pipeline.prompt_template, pipeline.context_strategy, pipeline.agent_config
+        return pipeline.prompt_template, pipeline.context_strategy, pipeline.agent_config, pipeline
 
     # 2. Fall back to AgentAPIConfig associations
     config = _get_agent_config()
@@ -319,14 +302,14 @@ def _resolve_pipeline(skill: str):
         template = config.prompt_template
         strategy = config.context_strategy
         if template and template.skill == skill:
-            return template, strategy, config
+            return template, strategy, config, None
 
     # 3. Fall back to any default template for this skill
     from prompt_engine.models import PromptTemplate
     from context_engine.models import ContextStrategy
     template = PromptTemplate.objects.filter(skill=skill, is_active=True, is_default=True).first()
     strategy = ContextStrategy.objects.filter(is_active=True, is_default=True).first()
-    return template, strategy, _get_agent_config()
+    return template, strategy, _get_agent_config(), None
 
 
 def _sse_event(data: dict) -> str:
@@ -344,12 +327,15 @@ def chat_completions(request, course_id):
     d = ser.validated_data
     session_id = d["session_id"]
     user_message = d["message"]
-    skill = d.get("skill", "qa")
 
     try:
         session = ChatSession.objects.get(pk=session_id, user=request.user, course_id=course_id)
     except ChatSession.DoesNotExist:
         return make_response(code=404, message="会话不存在", http_status=404)
+
+    # skill 以会话为准；仅当请求显式指定时才覆盖（serializer 中 skill 已改为可选，
+    # 不再默认成 "qa" 造成与 session.skill 漂移）
+    skill = d.get("skill") or session.skill
 
     course = session.course
     user = request.user
@@ -362,7 +348,7 @@ def chat_completions(request, course_id):
     model = config.default_model or (config.model_list[0] if config.model_list else "gpt-3.5-turbo")
 
     # ── Resolve pipeline from DB ───────────────────────
-    prompt_template, context_strategy, _pipeline_config = _resolve_pipeline(skill)
+    prompt_template, context_strategy, _pipeline_config, trace_pipeline = _resolve_pipeline(skill)
 
     # Use strategy defaults or hardcoded fallbacks
     top_k = context_strategy.top_k if context_strategy else 5
@@ -370,6 +356,9 @@ def chat_completions(request, course_id):
     include_memory = context_strategy.include_memory if context_strategy else True
     include_history = context_strategy.include_history if context_strategy else True
     history_turns = context_strategy.history_turns if context_strategy else 10
+    # 这两个开关此前是「UI 上能配、代码零引用」，现在真正接进检索链路
+    rerank_enabled = bool(context_strategy.rerank_enabled) if context_strategy else False
+    enable_query_rewrite = bool(context_strategy.enable_query_rewrite) if context_strategy else False
 
     # ── Load user memories ─────────────────────────────
     memories = _get_user_memories(user, course) if include_memory else []
@@ -390,6 +379,7 @@ def chat_completions(request, course_id):
             try:
                 async def collect():
                     trace_session = session  # captured from outer scope
+                    trace_pipeline_obj = trace_pipeline  # 命中的管道，用于关联 TraceLog
                     turn_start = _time.time()
                     try:
                         # ── Phase 1: 检索 ──────────────────
@@ -397,26 +387,61 @@ def chat_completions(request, course_id):
                         queue.append({"_ctrl": "status", "phase": "searching",
                                        "message": "🔍 正在检索课程资料..."})
 
+                        # 检索式：开启查询改写时用「原问题 + 核心词版 + 英文术语」多路召回
+                        queries = expand_queries(user_message) if enable_query_rewrite else [user_message]
+                        collection_name = collection_name_for_course(course.id)
                         context_docs = []
-                        try:
-                            collection_name = f"course_{course.id}"
-                            context_docs = search_similar(collection_name, user_message, n_results=top_k)
-                        except Exception as e:
-                            logger.warning(f"RAG search failed: {e}")
+                        langchain_ok = True
+                        for q in queries:
+                            try:
+                                if search_with_scores is None:
+                                    raise RuntimeError("LangChain 检索不可用（langchain 依赖缺失）")
+                                found = search_with_scores(collection_name, q, top_k=top_k)
+                            except Exception as e:
+                                if langchain_ok:
+                                    logger.warning(f"LangChain scored search failed, falling back: {e}")
+                                    langchain_ok = False
+                                try:
+                                    found = search_similar(collection_name, q, n_results=top_k)
+                                except Exception as e2:
+                                    logger.warning(f"RAG search also failed: {e2}")
+                                    found = []
+                            for d in found:
+                                # Chroma 的 space=l2 返回「平方 L2 距离」，换算成真实余弦相似度
+                                d["similarity"] = round(distance_to_similarity(d.get("distance")), 4)
+                                d["query"] = q
+                            context_docs.extend(found)
 
-                        # filter by similarity threshold
+                        # 多查询结果合并：按内容去重，保留相似度最高的那条
+                        if len(queries) > 1 and context_docs:
+                            deduped = {}
+                            for d in context_docs:
+                                key = (d.get("content") or "")[:200]
+                                if key not in deduped or d["similarity"] > deduped[key]["similarity"]:
+                                    deduped[key] = d
+                            context_docs = list(deduped.values())
+
+                        # 相似度阈值过滤：similarity 现在是真实余弦相似度，阈值终于生效
                         if sim_threshold > 0 and context_docs:
-                            context_docs = [
-                                d for d in context_docs
-                                if (1 - (d.get("distance", 0) or 0)) >= sim_threshold
-                            ]
+                            context_docs = [d for d in context_docs if d["similarity"] >= sim_threshold]
+
+                        # 排序取 top_k；开启重排时用「向量相似度 + 字面重合度」融合排序
+                        context_docs.sort(key=lambda d: d.get("similarity", 0.0), reverse=True)
+                        context_docs = context_docs[:top_k]
+                        if rerank_enabled and len(context_docs) > 1:
+                            context_docs = lexical_rerank(user_message, context_docs)
 
                         t_retrieve = (_time.time() - t0) * 1000
                         await sync_to_async(TraceLog.objects.create)(
-                            session=trace_session, phase="retrieve",
+                            session=trace_session, pipeline=trace_pipeline_obj, phase="retrieve",
                             duration_ms=round(t_retrieve, 1),
                             detail={"top_k": top_k, "threshold": sim_threshold,
-                                    "found": len(context_docs), "query": user_message[:200]},
+                                    "found": len(context_docs), "query": user_message[:200],
+                                    "queries": queries, "rerank": rerank_enabled,
+                                    "avg_similarity": round(
+                                        sum(d.get("similarity", 0.0) for d in context_docs)
+                                        / len(context_docs), 4
+                                    ) if context_docs else 0.0},
                         )
 
                         if context_docs:
@@ -430,7 +455,7 @@ def chat_completions(request, course_id):
                                            "retrievals": [{
                                                "source": d.get("metadata", {}).get("source", "未知来源"),
                                                "preview": d["content"][:120] + "..." if len(d["content"]) > 120 else d["content"],
-                                               "relevance": f"{max(0, min(100, int((1 - (d.get('distance', 0) or 0)) * 100)))}%",
+                                               "relevance": f"{max(0, min(100, int(d.get('similarity', 0.0) * 100)))}%",
                                            } for d in context_docs]})
                         else:
                             queue.append({"_ctrl": "status", "phase": "no_docs",
@@ -447,16 +472,14 @@ def chat_completions(request, course_id):
                         queue.append({"_ctrl": "status", "phase": "analyzing",
                                        "message": "🔄 正在综合分析资料与学生画像..."})
 
-                        # ── Build system prompt ────────────
-                        if prompt_template and prompt_template.content:
-                            system_prompt = _build_system_prompt_from_template(
-                                prompt_template.content, course.name, context_docs,
-                                memory_prompt, user_message,
-                            )
-                        else:
-                            system_prompt = _build_system_prompt_legacy(
-                                skill, course.name, context_docs, memory_prompt,
-                            )
+                        # ── Build system prompt（装配逻辑在 services.rag_chain）──
+                        system_prompt = render_system_prompt(
+                            prompt_template.content if prompt_template else None,
+                            skill, course.name, context_docs,
+                            memory_prompt, user_message,
+                            # 后台配置的「全局 System Prompt」，所有技能共用的前置规范
+                            global_preamble=_pipeline_config.system_prompt if _pipeline_config else "",
+                        )
 
                         # Build messages array
                         messages = [{"role": "system", "content": system_prompt}]
@@ -476,7 +499,7 @@ def chat_completions(request, course_id):
 
                         t_build = (_time.time() - t0) * 1000
                         await sync_to_async(TraceLog.objects.create)(
-                            session=trace_session, phase="build_prompt",
+                            session=trace_session, pipeline=trace_pipeline_obj, phase="build_prompt",
                             duration_ms=round(t_build, 1),
                             detail={"template_id": prompt_template.id if prompt_template else None,
                                     "template_name": prompt_template.name if prompt_template else "legacy",
@@ -490,7 +513,7 @@ def chat_completions(request, course_id):
                         thinking_info = {
                             "systemPrompt": system_prompt[:500],  # 增大预览长度
                             "fullSystemPrompt": system_prompt,     # 完整 prompt
-                            "retrievalInfo": f"检索到 {len(context_docs)} 个片段 (top_k={top_k})",
+                            "retrievalInfo": f"检索到 {len(context_docs)} 个片段 (top_k={top_k}, 检索式={len(queries)}, 重排={'开' if rerank_enabled else '关'})",
                             "model": model,
                             "pipeline": pipeline_name,
                         }
@@ -507,20 +530,44 @@ def chat_completions(request, course_id):
                         t0 = _time.time()
                         first_content = True
                         ai_response_text = ""
-                        async for event in chat_stream_structured(
-                            messages=messages, base_url=config.base_url,
-                            api_key=config.get_api_key(), model=model,
-                        ):
-                            if event["type"] == "content":
-                                if first_content:
-                                    queue.append({"_ctrl": "answer_start"})
-                                    first_content = False
-                                ai_response_text += event["content"]
-                                queue.append(event)
+
+                        # LangChain LLM 流式生成（fallback 到原实现）
+                        _use_langchain_llm = True
+                        try:
+                            if get_llm_with_params is None:
+                                raise RuntimeError("LangChain LLM 不可用（langchain 依赖缺失）")
+                            llm = get_llm_with_params(
+                                base_url=config.base_url.rstrip("/"),
+                                api_key=config.get_api_key(),
+                                model=model,
+                            )
+                            async for chunk in llm.astream(messages):
+                                content = chunk.content
+                                if content:
+                                    if first_content:
+                                        queue.append({"_ctrl": "answer_start"})
+                                        first_content = False
+                                    ai_response_text += content
+                                    queue.append({"type": "content", "content": content})
+                        except Exception as e:
+                            logger.warning(f"LangChain LLM failed, falling back: {e}")
+                            _use_langchain_llm = False
+
+                        if not _use_langchain_llm:
+                            async for event in chat_stream_structured(
+                                messages=messages, base_url=config.base_url,
+                                api_key=config.get_api_key(), model=model,
+                            ):
+                                if event["type"] == "content":
+                                    if first_content:
+                                        queue.append({"_ctrl": "answer_start"})
+                                        first_content = False
+                                    ai_response_text += event["content"]
+                                    queue.append(event)
 
                         t_generate = (_time.time() - t0) * 1000
                         await sync_to_async(TraceLog.objects.create)(
-                            session=trace_session, phase="generate",
+                            session=trace_session, pipeline=trace_pipeline_obj, phase="generate",
                             duration_ms=round(t_generate, 1),
                             detail={"model": model, "response_length": len(ai_response_text)},
                         )
@@ -530,7 +577,7 @@ def chat_completions(request, course_id):
                         await sync_to_async(_update_memory)(user, course, user_message, ai_response_text)
                         t_memory = (_time.time() - t0) * 1000
                         await sync_to_async(TraceLog.objects.create)(
-                            session=trace_session, phase="memory",
+                            session=trace_session, pipeline=trace_pipeline_obj, phase="memory",
                             duration_ms=round(t_memory, 1),
                             detail={"topics": _extract_topics(user_message)},
                         )
@@ -557,6 +604,7 @@ def chat_completions(request, course_id):
         t.start()
 
         answer_started = False
+        answer_saved = False
         pos = 0
         while t.is_alive() or pos < len(queue):
             while pos < len(queue):
@@ -577,6 +625,7 @@ def chat_completions(request, course_id):
                         content=full_response,
                         sources=item.get("sources", ""),
                     )
+                    answer_saved = True
                     yield _sse_event({"type": "done", "sources": item.get("sources", "")})
                 elif ctrl == "error":
                     yield _sse_event({"type": "error", "message": item["message"]})
@@ -591,11 +640,14 @@ def chat_completions(request, course_id):
                 break
             _time.sleep(0.03)
 
-        # 兜底
-        if full_response.strip():
-            ChatMessage.objects.get_or_create(
+        # 兜底：仅当 done 事件没走到（中断/异常）时保存半截回答。
+        # 旧实现用 get_or_create(session, role) 匹配任意历史 assistant 消息，
+        # 导致中断时的半截回答永远存不进去 —— 这里用 answer_saved 标记精确判断。
+        if not answer_saved and full_response.strip():
+            ChatMessage.objects.create(
                 session=session, role="assistant",
-                defaults={"content": full_response, "sources": "\n".join(sources_list)},
+                content=full_response.strip(),
+                sources="\n".join(sources_list),
             )
 
     response = StreamingHttpResponse(sync_gen(), content_type="text/event-stream")

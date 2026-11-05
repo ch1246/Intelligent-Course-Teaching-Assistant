@@ -1,0 +1,243 @@
+{
+  "rag_vs_plain": [
+    {
+      "query": "什么是梯度下降算法？",
+      "rag_len": 906,
+      "rag_grounded": 0.1569,
+      "rag_avg_sim": 0.1045,
+      "plain_len": 1535
+    },
+    {
+      "query": "什么是反向传播算法？",
+      "rag_len": 1070,
+      "rag_grounded": 0.3043,
+      "rag_avg_sim": 0.0889,
+      "plain_len": 2049
+    },
+    {
+      "query": "什么是卷积神经网络？",
+      "rag_len": 778,
+      "rag_grounded": 0.1628,
+      "rag_avg_sim": 0.0594,
+      "plain_len": 1332
+    },
+    {
+      "query": "什么是注意力机制？",
+      "rag_len": 800,
+      "rag_grounded": 0.2553,
+      "rag_avg_sim": 0.2827,
+      "plain_len": 1740
+    },
+    {
+      "query": "什么是过拟合？",
+      "rag_len": 232,
+      "rag_grounded": 0.0952,
+      "rag_avg_sim": 0.0186,
+      "plain_len": 988
+    },
+    {
+      "query": "什么是正则化？",
+      "rag_len": 1592,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 1821
+    },
+    {
+      "query": "什么是交叉验证？",
+      "rag_len": 1616,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 2106
+    },
+    {
+      "query": "什么是特征工程？",
+      "rag_len": 1686,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 1654
+    },
+    {
+      "query": "什么是损失函数？",
+      "rag_len": 958,
+      "rag_grounded": 0.0667,
+      "rag_avg_sim": 0.429,
+      "plain_len": 1737
+    },
+    {
+      "query": "什么是批归一化？",
+      "rag_len": 882,
+      "rag_grounded": 0.24,
+      "rag_avg_sim": 0.0801,
+      "plain_len": 2088
+    },
+    {
+      "query": "推导线性回归的正规方程",
+      "rag_len": 1663,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0.037,
+      "plain_len": 2911
+    },
+    {
+      "query": "推导交叉熵损失函数的梯度",
+      "rag_len": 1733,
+      "rag_grounded": 0.0714,
+      "rag_avg_sim": 0.0937,
+      "plain_len": 2481
+    },
+    {
+      "query": "推导反向传播中权重梯度的计算公式",
+      "rag_len": 2910,
+      "rag_grounded": 0.375,
+      "rag_avg_sim": 0.1817,
+      "plain_len": 3233
+    },
+    {
+      "query": "推导sigmoid函数的导数",
+      "rag_len": 1040,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0.031,
+      "plain_len": 1194
+    },
+    {
+      "query": "推导注意力机制的计算过程",
+      "rag_len": 2240,
+      "rag_grounded": 0.1304,
+      "rag_avg_sim": 0.1028,
+      "plain_len": 3816
+    },
+    {
+      "query": "比较线性回归和逻辑回归的区别",
+      "rag_len": 2029,
+      "rag_grounded": 0.2429,
+      "rag_avg_sim": 0.0736,
+      "plain_len": 2404
+    },
+    {
+      "query": "比较L1和L2正则化的区别",
+      "rag_len": 1855,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0.0173,
+      "plain_len": 2439
+    },
+    {
+      "query": "比较SGD和Adam优化器的区别",
+      "rag_len": 2319,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 3172
+    },
+    {
+      "query": "比较BatchNorm和LayerNorm的区别",
+      "rag_len": 2521,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 4341
+    },
+    {
+      "query": "比较监督学习和无监督学习",
+      "rag_len": 1592,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 3073
+    },
+    {
+      "query": "在什么情况下使用随机森林而不是决策树？",
+      "rag_len": 2273,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 2011
+    },
+    {
+      "query": "什么情况下需要使用数据增强？",
+      "rag_len": 992,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 1608
+    },
+    {
+      "query": "什么情况下使用迁移学习效果更好？",
+      "rag_len": 1072,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 1496
+    },
+    {
+      "query": "如何选择合适的损失函数？",
+      "rag_len": 1072,
+      "rag_grounded": 0.1692,
+      "rag_avg_sim": 0.1446,
+      "plain_len": 3427
+    },
+    {
+      "query": "如何处理类别不平衡问题？",
+      "rag_len": 2908,
+      "rag_grounded": 0.0,
+      "rag_avg_sim": 0,
+      "plain_len": 4519
+    }
+  ],
+  "topk_comparison": [
+    {
+      "top_k": 3,
+      "avg_len": 1047.5,
+      "avg_grounded": 0.1483,
+      "avg_sim": 0.1091,
+      "avg_docs": 1.1
+    },
+    {
+      "top_k": 5,
+      "avg_len": 1081.8,
+      "avg_grounded": 0.14,
+      "avg_sim": 0.1063,
+      "avg_docs": 1.3
+    },
+    {
+      "top_k": 8,
+      "avg_len": 1133.7,
+      "avg_grounded": 0.1434,
+      "avg_sim": 0.1048,
+      "avg_docs": 1.5
+    },
+    {
+      "top_k": 10,
+      "avg_len": 1033.0,
+      "avg_grounded": 0.1578,
+      "avg_sim": 0.1048,
+      "avg_docs": 1.5
+    }
+  ],
+  "threshold_comparison": [
+    {
+      "threshold": 0.0,
+      "avg_len": 1343.3,
+      "avg_grounded": 0.1488,
+      "avg_docs_before": 1.5,
+      "avg_docs_after": 1.5,
+      "filter_rate": 0.0
+    },
+    {
+      "threshold": 0.3,
+      "avg_len": 1618.3,
+      "avg_grounded": 0.0029,
+      "avg_docs_before": 1.5,
+      "avg_docs_after": 0.1,
+      "filter_rate": 0.9333
+    },
+    {
+      "threshold": 0.5,
+      "avg_len": 1832.6,
+      "avg_grounded": 0.0,
+      "avg_docs_before": 1.5,
+      "avg_docs_after": 0.0,
+      "filter_rate": 1.0
+    },
+    {
+      "threshold": 0.7,
+      "avg_len": 1787.3,
+      "avg_grounded": 0.0,
+      "avg_docs_before": 1.5,
+      "avg_docs_after": 0.0,
+      "filter_rate": 1.0
+    }
+  ]
+}

@@ -8,7 +8,9 @@ class UploadedFileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UploadedFile
-        fields = ['id', 'original_name', 'stored_path', 'file_size', 'mime_type',
+        # 注意：不再输出 stored_path —— 它是服务器绝对路径，属于信息泄露。
+        # 需要下载能力时另加受鉴权的下载接口，而不是把磁盘路径交给前端。
+        fields = ['id', 'original_name', 'file_size', 'mime_type',
                   'course', 'course_name', 'uploader', 'uploader_name', 'is_vectorized', 'created_at']
         read_only_fields = ['id', 'created_at', 'uploader_name']
 

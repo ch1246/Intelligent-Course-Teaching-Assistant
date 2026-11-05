@@ -2,14 +2,14 @@
 import type { FormInstance, FormRules } from "element-plus";
 import { ref, reactive, inject, useTemplateRef } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { User, Phone, Lock, WarnTriangleFilled, CircleClose, UserFilled, School } from "@element-plus/icons-vue";
+import { User, Phone, Lock, CircleClose, UserFilled, School } from "@element-plus/icons-vue";
 import { useNamespace } from "@/composables";
-import { useVerifyCode } from "../use-verify-code";
 import { t } from "@/common/languages";
 import { UserService } from "@/common/api/user";
 
 const ns = useNamespace("login-form");
-const { isDisabled, text } = useVerifyCode();
+// 短信验证码框已移除：useVerifyCode 只是前端倒计时，从不真正发码，
+// 后端 RegisterSerializer 也不校验 verify_code。
 
 const showPassword = ref(false);
 const loading = ref(false);
@@ -36,7 +36,6 @@ const majorOptions = [
 
 const ruleForm = reactive({
   phone: "",
-  verifyCode: "",
   password: "",
   repeatPassword: "",
   realName: "",
@@ -113,7 +112,6 @@ const register = async () => {
 const switchLoginMode = inject("switchLoginMode") as (mode: string) => void;
 
 const onBackToLogin = () => {
-  useVerifyCode().end();
   switchLoginMode("login");
 };
 
@@ -128,20 +126,6 @@ const showPrivacy = () => {
   <el-form ref="ruleFormRef" :model="ruleForm" :rules="rules" size="default" :class="[ns.b(), 'register-form']">
     <el-form-item prop="phone">
       <el-input clearable v-model="ruleForm.phone" :placeholder="$t('_login.phoneNumber')" :prefix-icon="Phone" />
-    </el-form-item>
-
-    <el-form-item prop="verifyCode">
-      <div style="display: flex; justify-content: space-between; width: 100%; gap: 12px">
-        <el-input
-          clearable
-          v-model="ruleForm.verifyCode"
-          :placeholder="$t('_login.smsVerifyCode')"
-          :prefix-icon="WarnTriangleFilled"
-        />
-        <el-button :disabled="isDisabled" @click="useVerifyCode().start(ruleFormRef, 'phone')">
-          {{ text.length > 0 ? text + $t("_common.secondsRetry") : $t("_common.getCode") }}
-        </el-button>
-      </div>
     </el-form-item>
 
     <el-form-item prop="password">

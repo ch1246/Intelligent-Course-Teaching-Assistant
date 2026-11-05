@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
 import { ElMessage } from "element-plus";
-import { School, TrendCharts, Notebook, VideoCamera, Check, Star, Clock, User, Search } from "@element-plus/icons-vue";
+import { School, Notebook, Check, Star, Clock, User, Search } from "@element-plus/icons-vue";
 import { storeToRefs } from "pinia";
 import { useUserStore } from "@/pinia";
 import { http } from "@/common/http";
@@ -184,10 +184,13 @@ const mapCatalogCourse = (c: any): CatalogCourse => ({
   })),
   maxStudents: c.max_students ?? c.capacity ?? 0,
   enrolledCount: c.enrolled_count ?? c.enrolledCount ?? 0,
-  schedule: (c.schedule_slots || [])
-    .map((s: any) => `${s.weekday_label || ""} ${(s.start_time || "").substring(0, 5)}-${(s.end_time || "").substring(0, 5)} ${s.location || ""}`.trim())
-    .filter(Boolean)
-    .join("；") || "",
+  schedule:
+    (c.schedule_slots || [])
+      .map((s: any) =>
+        `${s.weekday_label || ""} ${(s.start_time || "").substring(0, 5)}-${(s.end_time || "").substring(0, 5)} ${s.location || ""}`.trim()
+      )
+      .filter(Boolean)
+      .join("；") || "",
   coverGradient: c.cover_gradient || `linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)`,
   icon: Notebook,
   tags: [],
