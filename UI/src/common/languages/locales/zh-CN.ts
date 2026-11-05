@@ -1213,6 +1213,8 @@ export default {
     copy: "复制",
     download: "下载",
     regenerate: "重新生成",
+    stopGenerate: "停止生成",
+    stoppedMarker: "已停止生成",
     like: "喜欢",
     liked: "已赞",
     dislike: "不喜欢",

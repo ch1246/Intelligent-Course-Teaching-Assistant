@@ -1222,6 +1222,8 @@ export default {
     copy: "Copy",
     download: "Download",
     regenerate: "Regenerate",
+    stopGenerate: "Stop generating",
+    stoppedMarker: "Generation stopped",
     like: "Like",
     liked: "Liked",
     dislike: "Dislike",

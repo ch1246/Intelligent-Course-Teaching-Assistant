@@ -8,7 +8,7 @@ import {
   Download,
   Refresh,
   Plus,
-  Loading,
+  Stop,
   ChatDotRound,
   Edit,
   Monitor,
@@ -106,6 +106,10 @@ const sessions = ref<Session[]>([]);
 const activeSession = ref(0);
 const inputText = ref("");
 const isStreaming = ref(false);
+/** 当前流式请求的中断控制器：点「停止生成」时 abort 掉 fetch */
+const abortController = ref<AbortController | null>(null);
+/** 是否由用户主动停止——用于区分「用户按停」与「网络异常」，前者不覆盖已生成的内容 */
+const userStopped = ref(false);
 const messages = ref<Message[]>([]);
 const messagesRef = ref<HTMLElement>();
 const currentThinking = ref<ThinkingData | null>(null);
@@ -338,6 +342,8 @@ const sendMessage = async () => {
   scrollToBottom();
 
   isStreaming.value = true;
+  userStopped.value = false;
+  abortController.value = new AbortController();
 
   // 创建 AI 消息占位 + 思考数据
   const thinkingData: ThinkingData = {
@@ -365,6 +371,7 @@ const sendMessage = async () => {
   try {
     const response = await apiFetch(`${API_PREFIX}/course/${courseId.value}/chat/completions`, {
       method: "POST",
+      signal: abortController.value?.signal,
       body: JSON.stringify({
         session_id: activeSession.value,
         message: text,
@@ -458,15 +465,31 @@ const sendMessage = async () => {
   } catch (err: any) {
     const lastMsg3 = messages.value[messages.value.length - 1];
     lastMsg3.thinking = undefined;
-    const err3 = cleanError(err.message);
-    lastMsg3.content = `❌ ${t("_courseChat.requestFailed")}：${err3.summary}`;
-    lastMsg3.errorDetail = err3.detail;
+    if (userStopped.value) {
+      // 用户主动停止：保留已经流式输出的那部分内容，只补一个「已停止」标记，
+      // 不要用错误文案把它覆盖掉。
+      lastMsg3.content = lastMsg3.content
+        ? `${lastMsg3.content}\n\n> ${t("_courseChat.stoppedMarker")}`
+        : t("_courseChat.stoppedMarker");
+    } else {
+      const err3 = cleanError(err.message);
+      lastMsg3.content = `❌ ${t("_courseChat.requestFailed")}：${err3.summary}`;
+      lastMsg3.errorDetail = err3.detail;
+    }
   } finally {
     isStreaming.value = false;
+    abortController.value = null;
     currentThinking.value = null;
     await nextTick();
     scrollToBottom();
   }
+};
+
+/** 停止当前回答的生成（保留已输出的部分） */
+const stopGeneration = () => {
+  if (!isStreaming.value || !abortController.value) return;
+  userStopped.value = true;
+  abortController.value.abort();
 };
 
 // ── Actions ───────────────────────────────────────────
@@ -518,70 +541,143 @@ const handleCodeClick = (e: MouseEvent) => {
 };
 
 const renderMarkdown = (content: string): string => {
-  // Protect code blocks from other transforms
-  const codeBlocks: string[] = [];
+  if (!content) return "";
+
+  // 1. 转义 HTML
   let html = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // Code blocks ```language\n...```
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m: string, lang: string, code: string) => {
-    const langLabel = lang || "text";
-    const placeholder = `__CODEBLOCK_${codeBlocks.length}__`;
-    codeBlocks.push(
-      `<div class="code-block-wrap" data-lang="${langLabel}"><div class="code-block-header"><span class="code-lang">${langLabel}</span><span class="code-actions"><span class="code-btn" data-action="copy" title="${t("_courseChat.copy")}">📋 ${t("_courseChat.copy")}</span><span class="code-btn" data-action="download" title="${t("_courseChat.download")}">⬇ ${t("_courseChat.download")}</span></span></div><pre class="code-block"><code>${code}</code></pre></div>`
-    );
-    return placeholder;
-  });
-  // Inline code `code`
-  html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-  // Bold **text**
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // 2. 把「整块」元素摘出来暂存，避免被后面的内联规则（粗体/斜体/换行）破坏。
+  //    用 Unicode 私用区 \uE000 做占位符：正常正文不会出现它，其它正则也命中不了，
+  //    而且它不是控制字符，不会触发 no-control-regex。
+  const stash: string[] = [];
+  const keep = (s: string): string => {
+    const key = `\uE000${stash.length}\uE000`;
+    stash.push(s);
+    return key;
+  };
 
-  // Block LaTeX $$...$$ → KaTeX rendered
+  // 还原 HTML 实体，让 KaTeX 看到原始的 < > &
+  const unescapeForMath = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+  // 2a. 代码块 ```lang ... ```
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m: string, lang: string, code: string) => {
+    const langLabel = lang || "text";
+    return keep(
+      `<div class="code-block-wrap" data-lang="${langLabel}"><div class="code-block-header"><span class="code-lang">${langLabel}</span><span class="code-actions"><span class="code-btn" data-action="copy" title="${t("_courseChat.copy")}">📋 ${t("_courseChat.copy")}</span><span class="code-btn" data-action="download" title="${t("_courseChat.download")}">⬇ ${t("_courseChat.download")}</span></span></div><pre class="code-block"><code>${code.replace(/\n$/, "")}</code></pre></div>`
+    );
+  });
+
+  // 2b. 块级公式 $$...$$
   html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_m: string, tex: string) => {
     try {
-      return `<div class="latex-block">${katex.renderToString(tex.trim(), { throwOnError: false, displayMode: true, strict: false })}</div>`;
+      return keep(
+        `<div class="latex-block">${katex.renderToString(unescapeForMath(tex.trim()), { throwOnError: false, displayMode: true, strict: false })}</div>`
+      );
     } catch {
-      return `<div class="latex-block latex-error">$$${tex}$$</div>`;
-    }
-  });
-  // Inline LaTeX $...$ → KaTeX rendered (avoid matching escaped \$ or currency)
-  html = html.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\d)/g, (_m: string, tex: string) => {
-    try {
-      return `<span class="latex-inline">${katex.renderToString(tex.trim(), { throwOnError: false, strict: false })}</span>`;
-    } catch {
-      return `<span class="latex-inline">$${tex}$</span>`;
+      return keep(`<div class="latex-block latex-error">$${tex}$</div>`);
     }
   });
 
-  // Unordered lists
-  html = html.replace(/(?:^|\n)((?:[\t ]*[-*+][\s\S]+?\n?)+)/g, (_m: string, list: string) => {
+  // 3. 标题 —— 必须在「换行转 <br>」之前处理，否则 ^/$ 锚点全部失效
+  html = html.replace(/^#{6} (.+)$/gm, '<h6 class="md-heading md-h6">$1</h6>');
+  html = html.replace(/^#{5} (.+)$/gm, '<h5 class="md-heading md-h5">$1</h5>');
+  html = html.replace(/^#{4} (.+)$/gm, '<h4 class="md-heading md-h4">$1</h4>');
+  html = html.replace(/^#{3} (.+)$/gm, '<h3 class="md-heading md-h3">$1</h3>');
+  html = html.replace(/^#{2} (.+)$/gm, '<h2 class="md-heading md-h2">$1</h2>');
+  html = html.replace(/^#{1} (.+)$/gm, '<h1 class="md-heading md-h1">$1</h1>');
+
+  // 4. 分隔线 --- / *** / ___
+  html = html.replace(/^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$/gm, keep('<hr class="md-hr">'));
+
+  // 5. 表格 | a | b |
+  html = html.replace(/(?:^|\n)((?:\|[^\n]*\|[ \t]*(?:\n|$))+)/g, (_m: string, block: string) => {
+    const rows = block.split("\n").filter(l => l.trim());
+    if (rows.length < 2) return block;
+    const cellsOf = (line: string) =>
+      line
+        .trim()
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map(c => c.trim());
+    // 第二行是 |---|:---:| 之类的分隔行才认定为表格
+    const sep = cellsOf(rows[1] ?? "");
+    if (!sep.length || !sep.every(c => /^:?-{2,}:?$/.test(c))) return block;
+
+    const aligns = sep.map(c => (c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : "left"));
+    const head = cellsOf(rows[0])
+      .map((c, i) => `<th style="text-align:${aligns[i] ?? "left"}">${c}</th>`)
+      .join("");
+    const body = rows
+      .slice(2)
+      .map(
+        r =>
+          `<tr>${cellsOf(r)
+            .map((c, i) => `<td style="text-align:${aligns[i] ?? "left"}">${c}</td>`)
+            .join("")}</tr>`
+      )
+      .join("");
+    return keep(
+      `<div class="md-table-wrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+    );
+  });
+
+  // 6. 引用块 > 内容（转义后是 &gt;）
+  html = html.replace(/(?:^|\n)((?:&gt;[^\n]*(?:\n|$))+)/g, (_m: string, block: string) => {
+    const inner = block
+      .split("\n")
+      .map(l => l.replace(/^&gt;[ ]?/, ""))
+      .filter(l => l.trim())
+      .join("<br>");
+    return keep(`<blockquote class="md-quote">${inner}</blockquote>`);
+  });
+
+  // 7. 无序列表
+  html = html.replace(/(?:^|\n)((?:[ \t]*[-*+][ \t]+[^\n]*(?:\n|$))+)/g, (_m: string, list: string) => {
     const items = list
-      .split(/\n/)
-      .filter((l: string) => /^[\t ]*[-*+]\s/.test(l))
-      .map((l: string) => `<li>${l.replace(/^[\t ]*[-*+]\s/, "")}</li>`)
+      .split("\n")
+      .filter(l => /^[\t ]*[-*+]\s/.test(l))
+      .map(l => `<li>${l.replace(/^[\t ]*[-*+]\s/, "")}</li>`)
       .join("");
     return `<ul class="md-list">${items}</ul>`;
   });
-  // Ordered lists
-  html = html.replace(/(?:^|\n)((?:[\t ]*\d+\.[\s\S]+?\n?)+)/g, (_m: string, list: string) => {
+
+  // 7b. 有序列表
+  html = html.replace(/(?:^|\n)((?:[ \t]*\d+\.[ \t]+[^\n]*(?:\n|$))+)/g, (_m: string, list: string) => {
     const items = list
-      .split(/\n/)
-      .filter((l: string) => /^[\t ]*\d+\.\s/.test(l))
-      .map((l: string) => `<li>${l.replace(/^[\t ]*\d+\.\s/, "")}</li>`)
+      .split("\n")
+      .filter(l => /^[\t ]*\d+\.\s/.test(l))
+      .map(l => `<li>${l.replace(/^[\t ]*\d+\.\s/, "")}</li>`)
       .join("");
     return `<ol class="md-list">${items}</ol>`;
   });
-  // Line breaks
-  html = html.replace(/\n/g, "<br>");
-  // Headings
-  html = html.replace(/^### (.+)$/gm, '<h4 class="md-heading">$1</h4>');
-  html = html.replace(/^## (.+)$/gm, '<h3 class="md-heading">$1</h3>');
-  html = html.replace(/^# (.+)$/gm, '<h2 class="md-heading">$1</h2>');
 
-  // Restore code blocks
-  codeBlocks.forEach((block, i) => {
-    html = html.replace(`__CODEBLOCK_${i}__`, block);
+  // 8. 内联格式
+  html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+  html = html.replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/(^|[^*\w])\*([^*\n]+?)\*(?![*\w])/g, "$1<em>$2</em>");
+  html = html.replace(/~~([^~\n]+?)~~/g, "<del>$1</del>");
+  html = html.replace(
+    /\[([^\]\n]+?)\]\((https?:\/\/[^)\s]+?)\)/g,
+    '<a class="md-link" href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+
+  // 8b. 行内公式 $...$
+  html = html.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\d)/g, (_m: string, tex: string) => {
+    try {
+      return keep(
+        `<span class="latex-inline">${katex.renderToString(unescapeForMath(tex.trim()), { throwOnError: false, strict: false })}</span>`
+      );
+    } catch {
+      return keep(`<span class="latex-inline">$${tex}$</span>`);
+    }
   });
+
+  // 9. 换行 —— 最后一步，前面所有块级正则都依赖 \n 作为边界
+  html = html.replace(/\n/g, "<br>");
+
+  // 10. 还原暂存的整块元素
+  html = html.replace(/\uE000(\d+)\uE000/g, (_m: string, i: string) => stash[Number(i)] ?? "");
 
   return html;
 };
@@ -985,9 +1081,17 @@ const onClickFab = () => {
             @keydown.enter.exact.prevent="sendMessage"
           />
         </div>
-        <button class="send-btn" :class="{ loading: isStreaming }" @click="sendMessage">
-          <el-icon v-if="!isStreaming" :size="18"><Promotion /></el-icon>
-          <el-icon v-else :size="18" class="is-loading"><Loading /></el-icon>
+        <!-- 流式进行中：按钮变成「停止生成」，点击保留已输出内容并中断 -->
+        <button
+          v-if="isStreaming"
+          class="send-btn stop-btn"
+          :title="$t('_courseChat.stopGenerate')"
+          @click="stopGeneration"
+        >
+          <el-icon :size="16"><Stop /></el-icon>
+        </button>
+        <button v-else class="send-btn" @click="sendMessage">
+          <el-icon :size="18"><Promotion /></el-icon>
         </button>
       </div>
     </main>
@@ -1553,21 +1657,25 @@ const onClickFab = () => {
         font-family: "JetBrains Mono", monospace;
       }
       :deep(.code-block-wrap) {
-        margin: 8px 0;
-        border-radius: 8px;
+        margin: 10px 0;
+        border-radius: 10px;
         overflow: hidden;
-        border: 1px solid #2a2a3e;
+        // 用主题变量而不是硬编码深色：亮色主题下才不会突兀成一个黑框
+        border: 1px solid var(--tk-gray-color-200);
+        background: var(--tk-gray-color-50);
         .code-block-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           padding: 6px 12px;
-          background: #16162a;
+          background: var(--tk-gray-color-100);
+          border-bottom: 1px solid var(--tk-gray-color-200);
           font-size: 11px;
           .code-lang {
-            color: #8b949e;
+            color: var(--tk-gray-color-500);
             font-weight: 600;
             text-transform: uppercase;
+            letter-spacing: 0.04em;
           }
           .code-actions {
             display: flex;
@@ -1575,43 +1683,49 @@ const onClickFab = () => {
           }
           .code-btn {
             cursor: pointer;
-            color: #8b949e;
+            color: var(--tk-gray-color-500);
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 11px;
             user-select: none;
+            transition: all 0.15s ease;
             &:hover {
-              background: #21213d;
-              color: #e6edf3;
+              background: var(--tk-gray-color-200);
+              color: var(--tk-gray-color-800);
             }
           }
         }
         .code-block {
-          background: #1e1e2e;
-          color: #cdd6f4;
-          padding: 14px 16px;
+          background: transparent;
+          color: var(--tk-gray-color-800);
+          padding: 12px 16px;
           overflow-x: auto;
           font-size: 0.85em;
-          line-height: 1.6;
+          line-height: 1.65;
           display: block;
           margin: 0;
+          font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+          white-space: pre;
+          tab-size: 2;
         }
       }
       :deep(.latex-block) {
+        // 去掉原来那个硬边框，改成只留一点点底色与左右留白，视觉上不再像贴了个框
         display: block;
         text-align: center;
-        padding: 16px 12px;
-        margin: 12px 0;
+        padding: 10px 8px;
+        margin: 10px 0;
         overflow-x: auto;
         font-size: 1.1em;
-        background: color-mix(in srgb, var(--tk-color-primary) 4%, transparent);
-        border-radius: 8px;
-        border: 1px solid color-mix(in srgb, var(--tk-color-primary) 12%, transparent);
+        background: transparent;
+        border-radius: 0;
+        border: none;
+        border-left: 3px solid color-mix(in srgb, var(--tk-color-primary) 30%, transparent);
         .katex-display {
           margin: 0;
         }
         .katex {
-          font-size: 1.1em;
+          font-size: 1.12em;
         }
       }
       :deep(.latex-inline) {
@@ -1628,21 +1742,118 @@ const onClickFab = () => {
         font-size: 0.9em;
       }
       :deep(.md-heading) {
-        margin: 12px 0 6px;
+        margin: 14px 0 8px;
         font-weight: 700;
+        line-height: 1.35;
         color: var(--tk-gray-color-900);
         &:first-child {
           margin-top: 0;
         }
       }
+      :deep(.md-h1) {
+        font-size: 1.32em;
+      }
+      :deep(.md-h2) {
+        font-size: 1.2em;
+      }
+      :deep(.md-h3) {
+        font-size: 1.1em;
+      }
+      :deep(.md-h4),
+      :deep(.md-h5),
+      :deep(.md-h6) {
+        font-size: 1em;
+        color: var(--tk-gray-color-700);
+      }
       :deep(.md-list) {
         margin: 8px 0;
-        padding-left: 24px;
+        padding-left: 22px;
         li {
           margin: 4px 0;
-          line-height: 1.6;
+          line-height: 1.65;
           color: var(--tk-gray-color-800);
         }
+      }
+      // 表格
+      :deep(.md-table-wrap) {
+        margin: 10px 0;
+        overflow-x: auto;
+        border: 1px solid var(--tk-gray-color-200);
+        border-radius: 8px;
+      }
+      :deep(.md-table) {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92em;
+        th,
+        td {
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--tk-gray-color-200);
+          border-right: 1px solid var(--tk-gray-color-100);
+          vertical-align: top;
+          line-height: 1.6;
+          &:last-child {
+            border-right: none;
+          }
+        }
+        th {
+          background: var(--tk-gray-color-100);
+          color: var(--tk-gray-color-800);
+          font-weight: 600;
+          white-space: nowrap;
+        }
+        tbody tr {
+          &:last-child td {
+            border-bottom: none;
+          }
+          &:hover {
+            background: color-mix(in srgb, var(--tk-color-primary) 5%, transparent);
+          }
+        }
+        td {
+          color: var(--tk-gray-color-800);
+        }
+      }
+      // 引用块
+      :deep(.md-quote) {
+        margin: 10px 0;
+        padding: 8px 14px;
+        border-left: 3px solid color-mix(in srgb, var(--tk-color-primary) 45%, transparent);
+        background: color-mix(in srgb, var(--tk-color-primary) 5%, transparent);
+        border-radius: 0 6px 6px 0;
+        color: var(--tk-gray-color-700);
+        font-size: 0.95em;
+        line-height: 1.7;
+      }
+      // 分隔线
+      :deep(.md-hr) {
+        border: none;
+        height: 1px;
+        margin: 16px 0;
+        background: linear-gradient(
+          to right,
+          transparent,
+          var(--tk-gray-color-200) 20%,
+          var(--tk-gray-color-200) 80%,
+          transparent
+        );
+      }
+      // 链接
+      :deep(.md-link) {
+        color: var(--tk-color-primary);
+        text-decoration: none;
+        border-bottom: 1px solid color-mix(in srgb, var(--tk-color-primary) 35%, transparent);
+        transition: border-color 0.15s ease;
+        &:hover {
+          border-bottom-color: var(--tk-color-primary);
+        }
+      }
+      :deep(del) {
+        color: var(--tk-gray-color-500);
+      }
+      :deep(em) {
+        font-style: italic;
+        color: var(--tk-gray-color-800);
       }
     }
     .message-bubble--empty {
@@ -1849,10 +2060,13 @@ const onClickFab = () => {
   &:active {
     transform: scale(0.95);
   }
-  &.loading {
-    background: var(--tk-gray-color-400);
-    cursor: default;
-    pointer-events: none;
+  // 流式进行中：变成「停止生成」，用警示色区分，但保持克制
+  &.stop-btn {
+    background: var(--tk-gray-color-700);
+    &:hover {
+      background: var(--tk-color-danger, #f56c6c);
+      transform: scale(1.05);
+    }
   }
 }
 
